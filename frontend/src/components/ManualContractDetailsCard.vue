@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { FwbInput, FwbSelect } from 'flowbite-vue'
+import { FwbInput, FwbSelect, FwbCheckbox } from 'flowbite-vue'
 import { PlanType, AccountType, OwnershipType, type ContractRecord } from '@/models/ContractRecord'
 
 const record = defineModel<ContractRecord>({ required: true })
@@ -32,12 +32,26 @@ const ownershipOptions = [
 </script>
 
 <template>
-	<div class="bg-[#f8f8f8] rounded-xl p-6 mb-4">
-		<p class="text-gray-900 text-sm font-bold mb-4">Contract Details - {{ record.contractNumber }}</p>
+	<div
+		class="bg-[#f8f8f8] rounded-xl p-6 mb-4"
+		:class="{ 'outline-blue-600 outline-2': record.selected }"
+	>
+		<div class="flex items-center justify-between mb-4">
+			<div class="flex items-center gap-2">
+				<FwbCheckbox v-model="record.selected" />
+
+				<div>
+					<p class="text-lg font-bold">No electronic record found</p>
+					<p>Enter the following details to proceed</p>
+				</div>
+			</div>
+			<p class="text-gray-900 text-sm font-bold">Contract #{{ record.contractNumber }}</p>
+		</div>
 
 		<div class="grid grid-cols-3 gap-4">
 			<FwbInput v-model="record.carrierName" label="Carrier Name" />
 			<FwbInput v-model="record.productName" label="Product Name" />
+			<FwbInput v-model="record.contractNumber" label="Contract Number" />
 			<FwbInput v-model="record.cusipNumber" label="CUSIP" />
 			<FwbSelect v-model="record.planType" :options="planTypeOptions" label="Plan Type" />
 			<FwbSelect v-model="record.accountType" :options="accountTypeOptions" label="Account Type" />

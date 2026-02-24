@@ -11,7 +11,8 @@ const router = createRouter({
 	routes: [
 		{
 			path: '/',
-			component: () => import('@/pages/Home.vue')
+			redirect: '/initiate-exchange',
+			// component: () => import('@/pages/Home.vue')
 		},
 		{
 			path: '/initiate-exchange',
@@ -50,6 +51,14 @@ const router = createRouter({
 					route: '/dtcc-results'
 				}
 			}
+		},
+		{
+			path: '/carrier-admin',
+			component: () => import('@/pages/carrier/CarrierAdmin.vue')
+		},
+		{
+			path: '/carrier-admin/:carrier',
+			component: () => import('@/pages/carrier/CarrierAdmin.vue')
 		}
 	],
 })
