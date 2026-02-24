@@ -63,13 +63,13 @@ onMounted(() => {
       <FwbTabs variant="underline" class="justify-center">
         <FwbTab
           name="carrier"
-          title="Carrier"
+          title="Athene Annuity"
           :active="activeTab === 'carrier'"
           @click="handleTabChange('carrier')"
         />
         <FwbTab
           name="carrier-2"
-          title="Carrier 2"
+          title="Nationwide Insurance"
           :active="activeTab === 'carrier-2'"
           @click="handleTabChange('carrier-2')"
         />
@@ -104,7 +104,7 @@ onMounted(() => {
       <div class="col-span-12 lg:col-span-4">
         <PolicyList
           :policies="policies"
-          :selected-id="selectedPolicy?.['transaction-id']"
+          :selected-id="selectedPolicy?.transactionId"
           @select="handleSelectPolicy"
         />
       </div>
