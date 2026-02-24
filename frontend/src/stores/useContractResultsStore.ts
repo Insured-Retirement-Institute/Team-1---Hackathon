@@ -2,21 +2,33 @@ import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import { AccountType, ContractStatus, OwnershipType, PlanType, type ContractRecord } from '@/models/ContractRecord'
 import { useLoaderStore } from '@/stores/useLoaderStore'
-import { brokerDealerApi, clearinghouseApi, insuranceCarrierApi } from '@/api/ClearinghouseApi'
+import { brokerDealerApi, insuranceCarrierApi } from '@/api/ClearinghouseApi'
 import type { DetailedPolicyInfo, PolicyInquiryRequest } from '@/models/ClearinghouseApi'
 
-const CARRIER_NAMES = [
-	'Prudential', 'Lincoln Financial', 'Jackson National', 'Nationwide',
-	'Transamerica', 'Allianz', 'AXA Equitable', 'Pacific Life',
-	'Athene', 'Brighthouse Financial', 'MetLife', 'Voya Financial'
-]
+const CARRIER_PRODUCTS: Record<string, string> = {
+	'Allianz Life': 'Allianz 222® Annuity',
+	'Nationwide': 'Nationwide Peak® 10',
+	'Lincoln Financial': 'Lincoln OptiBlend®',
+	'MassMutual': 'MassMutual Stable Voyage℠',
+	'Pacific Life': 'Pacific Index Foundation®',
+	'Corebridge Financial': 'Power Series Index Annuity / Power Index Advisory®',
+	'Jackson (Jackson National)': 'Perspective II®',
+	'Brighthouse Financial': 'Shield® Level II Annuities',
+	'Prudential': 'FlexGuard® Indexed Variable Annuity',
+	'New York Life (NYLIAC)': 'Secure Term MVA Fixed Annuity II',
+	'Athene': 'Athene Agility',
+	'Global Atlantic': 'ForeIncome II',
+	'F&G (Fidelity & Guaranty Life)': 'Safe Income Advantage®',
+	'American Equity': 'IncomeShield',
+	'EquiTrust Life Insurance Company': 'MarketMax Index™ Annuity',
+	'Symetra': 'Symetra Trek Plus',
+	'North American Company': 'NAC BenefitSolutions® 10',
+	'Delaware Life': 'Target Growth 10®',
+	'Securian Financial': 'AccumuLink™ Advance',
+	'American National': 'Palladium® Multi-Year Guarantee Annuity (MYG)'
+}
 
-const PRODUCT_NAMES = [
-	'Variable Annuity Plus', 'ChoicePlus Assurance', 'Elite Growth VA',
-	'Destination Navigator', 'Secure Foundation', 'Freedom Builder',
-	'Legacy Select', 'Horizon Advantage', 'Premier Income',
-	'FlexChoice Access', 'Wealth Protector', 'Income Shield'
-]
+const CARRIER_NAMES = Object.keys(CARRIER_PRODUCTS)
 
 const OWNER_NAMES = [
 	'John Smith', 'Mary Johnson', 'Robert Williams', 'Patricia Brown',
@@ -89,28 +101,45 @@ function mapApiContractStatus(apiStatus: string | null | undefined): ContractSta
 	if (!apiStatus) return ContractStatus.Inactive
 	const mapping: Record<string, ContractStatus> = {
 		active: ContractStatus.Active,
-		restricted: ContractStatus.ActiveRestricted,
 		inactive: ContractStatus.Inactive,
-		proprietary: ContractStatus.ProprietaryProduct,
+		distributionspecific: ContractStatus.DistributionSpecific,
+		fullwithdrawalpending: ContractStatus.FullWithdrawalPending,
+		carrierpending: ContractStatus.CarrierPending,
+		carrierspecific: ContractStatus.CarrierSpecific,
+		restricted: ContractStatus.ActiveRestricted,
+		ownershipissue: ContractStatus.OwnershipIssue,
+		notlicensed: ContractStatus.NotLicensed,
 		unappointed: ContractStatus.Unappointed
 	}
-	return mapping[apiStatus.toLowerCase()] ?? ContractStatus.Inactive
+	return mapping[apiStatus.toLowerCase().replace(/[^a-z]/g, '')] ?? ContractStatus.Inactive
 }
 
 function generateFakeDtccResult(searchContract: ContractRecord, index: number): ContractRecord {
-	const resolved = index > 2 // First record is unresolved, rest are resolved
+	const resolved = index > 1 // First record is unresolved, rest are resolved
+
+	// Determine contract status based on index
+	let contractStatus: ContractStatus
+	if (index === 3) {
+		contractStatus = ContractStatus.Unappointed
+	} else if (index === 4) {
+		contractStatus = ContractStatus.Active
+	} else {
+		contractStatus = randomEnumValue(ContractStatus)
+	}
 
 	if (resolved) {
+		const carrierName = randomElement(CARRIER_NAMES)
+		const productName = CARRIER_PRODUCTS[carrierName]!
 		return {
 			id: crypto.randomUUID(),
-			carrierName: randomElement(CARRIER_NAMES),
-			productName: randomElement(PRODUCT_NAMES),
+			carrierName,
+			productName,
 			contractNumber: searchContract.contractNumber,
 			cusipNumber: generateCusipNumber(),
 			ownership: randomEnumValue(OwnershipType),
 			trailing: Math.random() > 0.5,
 			withdrawalProgram: Math.random() > 0.5,
-			contractStatus: randomEnumValue(ContractStatus),
+			contractStatus,
 			dtccResolved: true,
 			selected: false
 		}
@@ -230,15 +259,15 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 				}
 			}
 
-			const response = await clearinghouseApi.submitPolicyInquiryRequest(transactionId, request)
+			const response = await brokerDealerApi.queryPolicies(transactionId, request)
 
-			if (false/*response.client.policies && response.client.policies.length > 0*/) {
+			if (response.client.policies && response.client.policies.length > 0) {
 				// Map API response to ContractRecords
-				// dtccContractResults.value = response.client.policies.map((policy) => {
-				// 	const hasErrors = policy.errors && policy.errors.length > 0
-				// 	const resolved = !hasErrors && !!policy.carrierName
-				// 	return mapDetailedPolicyToContractRecord(policy, resolved)
-				// })
+				dtccContractResults.value = response.client.policies.map((policy) => {
+					const hasErrors = policy.errors && policy.errors.length > 0
+					const resolved = !hasErrors && !!policy.carrierName
+					return mapDetailedPolicyToContractRecord(policy, resolved)
+				})
 			} else {
 				// Fallback to fake data
 				dtccContractResults.value = searchContracts.value

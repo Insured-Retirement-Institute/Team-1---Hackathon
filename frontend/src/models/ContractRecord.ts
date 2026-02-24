@@ -1,12 +1,16 @@
 import type { PolicyError, WithdrawalStructure } from './ClearinghouseApi'
 
 export enum ContractStatus {
-	ProprietaryProduct = 'Proprietary Product',
-	NotActive = 'Not Active',
-	Unappointed = 'Unappointed',
+	Active = 'Active',
 	Inactive = 'Inactive',
+	DistributionSpecific = 'Distribution Specific',
+	FullWithdrawalPending = 'Full Withdrawal Pending',
+	CarrierPending = 'Carrier Pending',
+	CarrierSpecific = 'Carrier Specific',
 	ActiveRestricted = 'Active - Restricted',
-	Active = 'Active'
+	OwnershipIssue = 'Ownership Issue',
+	NotLicensed = 'Not Licensed',
+	Unappointed = 'Unappointed'
 }
 
 export enum PlanType {
