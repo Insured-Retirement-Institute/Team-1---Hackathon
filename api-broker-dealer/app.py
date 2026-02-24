@@ -385,17 +385,30 @@ def internal_error(e):
     )
 
 
-def handler(event, context):
-    """
-    AWS Lambda handler function
+def _normalize_lambda_event(event):
+    """Ensure required WSGI fields are present for serverless_wsgi."""
+    if not event:
+        return event
 
-    Args:
-        event: AWS Lambda event object (API Gateway request)
-        context: AWS Lambda context object
+    headers = event.get("headers")
+    if not isinstance(headers, dict):
+        headers = {}
 
-    Returns:
-        Response formatted for API Gateway
-    """
+    if "X-Forwarded-Proto" not in headers and "x-forwarded-proto" not in headers:
+        protocol = (event.get("requestContext") or {}).get("http", {}).get("protocol")
+        scheme = None
+        if isinstance(protocol, str) and protocol:
+            scheme = protocol.split("/")[0].lower()
+        if not scheme:
+            scheme = "https"
+        headers["X-Forwarded-Proto"] = scheme
+
+    event["headers"] = headers
+    return event
+
+
+def lambda_handler(event, context):
+    event = _normalize_lambda_event(event)
     return serverless_wsgi.handle_request(app, event, context)
 
 
