@@ -54,7 +54,7 @@ function toggleSelect(record: ContractRecord) {
 
 function getStatusBadgeType(status: ContractStatus): 'green' | 'yellow' | 'red' {
 	if (status === ContractStatus.Active) return 'green'
-	if (status === ContractStatus.ActiveRestricted || status === ContractStatus.Unappointed) return 'yellow'
+	if (status === ContractStatus.ActiveRestricted || status === ContractStatus.OwnershipIssue || status === ContractStatus.Unappointed) return 'yellow'
 	return 'red'
 }
 </script>
