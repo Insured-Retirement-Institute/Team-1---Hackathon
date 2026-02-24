@@ -48,8 +48,6 @@ const ownershipOptions = [
 			<p class="text-gray-900 text-sm font-bold">Contract #{{ record.contractNumber }}</p>
 		</div>
 
-
-
 		<div class="grid grid-cols-3 gap-4">
 			<FwbInput v-model="record.carrierName" label="Carrier Name" />
 			<FwbInput v-model="record.productName" label="Product Name" />

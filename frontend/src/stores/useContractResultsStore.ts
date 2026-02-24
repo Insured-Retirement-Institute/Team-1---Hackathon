@@ -2,7 +2,7 @@ import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import { AccountType, ContractStatus, OwnershipType, PlanType, type ContractRecord } from '@/models/ContractRecord'
 import { useLoaderStore } from '@/stores/useLoaderStore'
-import { brokerDealerApi, insuranceCarrierApi } from '@/api/ClearinghouseApi'
+import { brokerDealerApi, clearinghouseApi, insuranceCarrierApi } from '@/api/ClearinghouseApi'
 import type { DetailedPolicyInfo, PolicyInquiryRequest } from '@/models/ClearinghouseApi'
 
 const CARRIER_NAMES = [
@@ -230,15 +230,15 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 				}
 			}
 
-			const response = await brokerDealerApi.queryPolicies(transactionId, request)
+			const response = await clearinghouseApi.submitPolicyInquiryRequest(transactionId, request)
 
-			if (response.client.policies && response.client.policies.length > 0) {
+			if (false/*response.client.policies && response.client.policies.length > 0*/) {
 				// Map API response to ContractRecords
-				dtccContractResults.value = response.client.policies.map((policy) => {
-					const hasErrors = policy.errors && policy.errors.length > 0
-					const resolved = !hasErrors && !!policy.carrierName
-					return mapDetailedPolicyToContractRecord(policy, resolved)
-				})
+				// dtccContractResults.value = response.client.policies.map((policy) => {
+				// 	const hasErrors = policy.errors && policy.errors.length > 0
+				// 	const resolved = !hasErrors && !!policy.carrierName
+				// 	return mapDetailedPolicyToContractRecord(policy, resolved)
+				// })
 			} else {
 				// Fallback to fake data
 				dtccContractResults.value = searchContracts.value

@@ -11,7 +11,8 @@ const router = createRouter({
 	routes: [
 		{
 			path: '/',
-			component: () => import('@/pages/Home.vue')
+			redirect: '/initiate-exchange',
+			// component: () => import('@/pages/Home.vue')
 		},
 		{
 			path: '/initiate-exchange',
