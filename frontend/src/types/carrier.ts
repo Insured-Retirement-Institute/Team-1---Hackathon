@@ -8,6 +8,11 @@ export interface WithdrawalStructure {
   systematicInPlace: boolean
 }
 
+export interface ServicingAgent {
+  agentName: string
+  npn: string
+}
+
 export interface PolicyError {
   errorCode: string
   message: string
@@ -43,6 +48,7 @@ export interface BdChangeRequest {
   updatedAt: string
   clientName: string
   ssnLast4: string
+  servicingAgent: ServicingAgent
   accountType: string
   planType: string
   ownership: string

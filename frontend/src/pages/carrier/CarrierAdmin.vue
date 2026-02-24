@@ -63,13 +63,13 @@ onMounted(() => {
       <FwbTabs variant="underline" class="justify-center">
         <FwbTab
           name="carrier"
-          title="Athene Annuity"
+          title="Athene"
           :active="activeTab === 'carrier'"
           @click="handleTabChange('carrier')"
         />
         <FwbTab
           name="carrier-2"
-          title="Nationwide Insurance"
+          title="Pacific Life"
           :active="activeTab === 'carrier-2'"
           @click="handleTabChange('carrier-2')"
         />

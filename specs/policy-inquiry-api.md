@@ -38,15 +38,15 @@ Submitted by the Receiving Broker/Dealer to DTCC.
 
 ### Field Reference
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `requestingFirm.firmName` | string | Name of the receiving broker/dealer |
-| `requestingFirm.firmId` | string | DTCC firm identifier |
-| `requestingFirm.servicingAgent.agentName` | string | Name of the new servicing agent |
-| `requestingFirm.servicingAgent.npn` | string | National Producer Number of the new agent |
-| `client.clientName` | string | Full name of the client |
-| `client.ssn` | string | Client's Social Security Number |
-| `client.policyNumbers` | string[] | List of policy numbers to inquire about |
+| Field                                     | Type     | Description                               |
+| ----------------------------------------- | -------- | ----------------------------------------- |
+| `requestingFirm.firmName`                 | string   | Name of the receiving broker/dealer       |
+| `requestingFirm.firmId`                   | string   | DTCC firm identifier                      |
+| `requestingFirm.servicingAgent.agentName` | string   | Name of the new servicing agent           |
+| `requestingFirm.servicingAgent.npn`       | string   | National Producer Number of the new agent |
+| `client.clientName`                       | string   | Full name of the client                   |
+| `client.ssn`                              | string   | Client's Social Security Number           |
+| `client.policyNumbers`                    | string[] | List of policy numbers to inquire about   |
 
 ### Notes
 
@@ -84,38 +84,26 @@ Returned by the Delivering Broker/Dealer through DTCC to the Receiving Firm.
       "clientName": null,
       "ssnLast4": null,
       "policies": [
-          {
-            "policyNumber": null,
-            "carrierName": null,
-            "accountType": null,
-            "planType": null,
-            "ownership": null,
-            "productName": null,
-            "cusip": null,
-            "trailingCommission": false,
-            "contractStatus": null,
-            "withdrawalStructure": {
-              "systematicInPlace": false
-            },
-            "errors": []
-          }
-        ]
+        {
+          "policyNumber": null,
+          "carrierName": null,
+          "accountType": null,
+          "planType": null,
+          "ownership": null,
+          "productName": null,
+          "cusip": null,
+          "trailingCommission": false,
+          "contractStatus": null,
+          "withdrawalStructure": {
+            "systematicInPlace": false
+          },
+          "errors": []
+        }
+      ]
     },
     "enums": {
-      "accountType": [
-        "individual",
-        "joint",
-        "trust",
-        "custodial",
-        "entity"
-      ],
-      "planType": [
-        "nonQualified",
-        "rothIra",
-        "traditionalIra",
-        "sep",
-        "simple"
-      ]
+      "accountType": ["individual", "joint", "trust", "custodial", "entity"],
+      "planType": ["nonQualified", "rothIra", "traditionalIra", "sep", "simple"]
     }
   }
 }
@@ -123,34 +111,34 @@ Returned by the Delivering Broker/Dealer through DTCC to the Receiving Firm.
 
 ### Field Reference
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `requestingFirm.firmName` | string | Echoed requesting firm name from the request |
-| `requestingFirm.firmId` | string | Echoed DTCC firm identifier from the request |
-| `requestingFirm.servicingAgent.agentName` | string | Echoed agent name from the request |
-| `requestingFirm.servicingAgent.npn` | string | Echoed NPN from the request |
-| `producerValidation.agentName` | string | Echoed agent name from the request |
-| `producerValidation.npn` | string | Echoed NPN from the request |
-| `producerValidation.errors` | array | Producer-level validation errors (see error catalog) |
-| `client.clientName` | string | Client name echoed back for confirmation |
-| `client.ssnLast4` | string | Last four digits of the client's SSN |
-| `client.policies` | array | List of policy details |
+| Field                                     | Type   | Description                                          |
+| ----------------------------------------- | ------ | ---------------------------------------------------- |
+| `requestingFirm.firmName`                 | string | Echoed requesting firm name from the request         |
+| `requestingFirm.firmId`                   | string | Echoed DTCC firm identifier from the request         |
+| `requestingFirm.servicingAgent.agentName` | string | Echoed agent name from the request                   |
+| `requestingFirm.servicingAgent.npn`       | string | Echoed NPN from the request                          |
+| `producerValidation.agentName`            | string | Echoed agent name from the request                   |
+| `producerValidation.npn`                  | string | Echoed NPN from the request                          |
+| `producerValidation.errors`               | array  | Producer-level validation errors (see error catalog) |
+| `client.clientName`                       | string | Client name echoed back for confirmation             |
+| `client.ssnLast4`                         | string | Last four digits of the client's SSN                 |
+| `client.policies`                         | array  | List of policy details                               |
 
 #### Policy Object
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `policyNumber` | string | Policy number identifying the policy |
-| `carrierName` | string | Name of the insurance carrier that wrote the annuity |
-| `accountType` | enum | Registration type of the account (see enums) |
-| `planType` | enum | Tax qualification type of the account (see enums) |
-| `ownership` | string | Ownership structure of the policy |
-| `productName` | string | Name of the annuity product |
-| `cusip` | string | CUSIP identifier for the product |
-| `trailingCommission` | boolean | Whether trailing commission will apply to the new servicing agent |
-| `contractStatus` | string | Current status of the contract |
-| `withdrawalStructure.systematicInPlace` | boolean | Whether a systematic withdrawal plan is currently active |
-| `errors` | array | Any errors or issues associated with this policy |
+| Field                                   | Type    | Description                                                       |
+| --------------------------------------- | ------- | ----------------------------------------------------------------- |
+| `policyNumber`                          | string  | Policy number identifying the policy                              |
+| `carrierName`                           | string  | Name of the insurance carrier that wrote the annuity              |
+| `accountType`                           | enum    | Registration type of the account (see enums)                      |
+| `planType`                              | enum    | Tax qualification type of the account (see enums)                 |
+| `ownership`                             | string  | Ownership structure of the policy                                 |
+| `productName`                           | string  | Name of the annuity product                                       |
+| `cusip`                                 | string  | CUSIP identifier for the product                                  |
+| `trailingCommission`                    | boolean | Whether trailing commission will apply to the new servicing agent |
+| `contractStatus`                        | string  | Current status of the contract                                    |
+| `withdrawalStructure.systematicInPlace` | boolean | Whether a systematic withdrawal plan is currently active          |
+| `errors`                                | array   | Any errors or issues associated with this policy                  |
 
 ### Notes
 
@@ -165,23 +153,23 @@ Returned by the Delivering Broker/Dealer through DTCC to the Receiving Firm.
 
 ### accountType
 
-| Value | Description |
-|-------|-------------|
+| Value        | Description        |
+| ------------ | ------------------ |
 | `individual` | Individual account |
-| `joint` | Joint account |
-| `trust` | Trust account |
-| `custodial` | Custodial account |
-| `entity` | Entity account |
+| `joint`      | Joint account      |
+| `trust`      | Trust account      |
+| `custodial`  | Custodial account  |
+| `entity`     | Entity account     |
 
 ### planType
 
-| Value | Description |
-|-------|-------------|
-| `nonQualified` | Non-qualified (after-tax) account |
-| `rothIra` | Roth Individual Retirement Account |
-| `traditionalIra` | Traditional Individual Retirement Account |
-| `sep` | Simplified Employee Pension |
-| `simple` | Savings Incentive Match Plan for Employees |
+| Value            | Description                                |
+| ---------------- | ------------------------------------------ |
+| `nonQualified`   | Non-qualified (after-tax) account          |
+| `rothIra`        | Roth Individual Retirement Account         |
+| `traditionalIra` | Traditional Individual Retirement Account  |
+| `sep`            | Simplified Employee Pension                |
+| `simple`         | Savings Incentive Match Plan for Employees |
 
 > **Note:** The planType list is a starting set. The full DTCC qualified account type list will be incorporated in a future revision.
 
@@ -193,22 +181,22 @@ Returned by the Delivering Broker/Dealer through DTCC to the Receiving Firm.
 
 Returned in the `producerValidation.errors` array at the response level. These errors apply to the servicing agent across all contracts in the request.
 
-| Error Code | Message | Description |
-|------------|---------|-------------|
-| `notAppointed` | Producer is not appointed with {carrierName} | The servicing agent does not have an active appointment with the carrier |
-| `notLicensed` | Producer is not licensed in {state} | The servicing agent does not hold the required license for the applicable jurisdiction |
+| Error Code            | Message                                                                        | Description                                                                                                              |
+| --------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `notAppointed`        | Producer is not appointed with {carrierName}                                   | The servicing agent does not have an active appointment with the carrier                                                 |
+| `notLicensed`         | Producer is not licensed in {state}                                            | The servicing agent does not hold the required license for the applicable jurisdiction                                   |
 | `affiliationMismatch` | Producer {agentName} is affiliated with {affiliatedFirm}, not {requestingFirm} | The carrier's records show the producer is associated with a different broker/dealer than the one submitting the request |
 
 ### Policy-Level Errors
 
 Returned in the `errors` array within each policy object.
 
-| Error Code | Message | Description |
-|------------|---------|-------------|
-| `ssnContractMismatch` | Client's SSN does not match the contract on file | The SSN provided in the request does not match the delivering firm's records for that policy number |
-| `proprietaryProduct` | Contract {policyNumber} is a proprietary product | The product is proprietary to the delivering firm and is not eligible for transfer |
-| `policyInactive` | Policy is inactive | The contract is no longer active (e.g., surrendered, matured, lapsed) |
-| `policyRestricted` | Policy is restricted for the following reason: {restrictionReason} | The policy has a restriction that prevents or limits the BD change process |
+| Error Code            | Message                                                            | Description                                                                                         |
+| --------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| `ssnContractMismatch` | Client's SSN does not match the contract on file                   | The SSN provided in the request does not match the delivering firm's records for that policy number |
+| `proprietaryProduct`  | Contract {policyNumber} is a proprietary product                   | The product is proprietary to the delivering firm and is not eligible for transfer                  |
+| `policyInactive`      | Policy is inactive                                                 | The contract is no longer active (e.g., surrendered, matured, lapsed)                               |
+| `policyRestricted`    | Policy is restricted for the following reason: {restrictionReason} | The policy has a restriction that prevents or limits the BD change process                          |
 
 ### Example — Mixed Results
 
