@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { FwbHeading, FwbSpinner, FwbTabs, FwbTab } from 'flowbite-vue'
+import { FwbHeading, FwbSpinner } from 'flowbite-vue'
 import type { BdChangeRequest, CarrierTable } from '@/types/carrier'
 import { fetchCarrierRequests } from '@/api/carrierApi'
 import PolicyList from '@/components/carrier/PolicyList.vue'
@@ -59,21 +59,33 @@ onMounted(() => {
     </div>
 
     <!-- Carrier Tabs -->
-    <div class="mb-6">
-      <FwbTabs variant="underline" class="justify-center">
-        <FwbTab
-          name="carrier"
-          title="Athene"
-          :active="activeTab === 'carrier'"
-          @click="handleTabChange('carrier')"
-        />
-        <FwbTab
-          name="carrier-2"
-          title="Pacific Life"
-          :active="activeTab === 'carrier-2'"
-          @click="handleTabChange('carrier-2')"
-        />
-      </FwbTabs>
+    <div class="mb-6 flex justify-center">
+      <div class="border-b border-gray-200">
+        <nav class="flex space-x-8" aria-label="Tabs">
+          <button
+            @click="handleTabChange('carrier')"
+            :class="[
+              'py-4 px-1 border-b-2 font-medium text-sm cursor-pointer',
+              activeTab === 'carrier'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            ]"
+          >
+            Athene
+          </button>
+          <button
+            @click="handleTabChange('carrier-2')"
+            :class="[
+              'py-4 px-1 border-b-2 font-medium text-sm cursor-pointer',
+              activeTab === 'carrier-2'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            ]"
+          >
+            Pacific Life
+          </button>
+        </nav>
+      </div>
     </div>
 
     <!-- Loading State -->
