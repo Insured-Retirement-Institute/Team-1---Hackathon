@@ -98,7 +98,7 @@ function mapApiContractStatus(apiStatus: string | null | undefined): ContractSta
 }
 
 function generateFakeDtccResult(searchContract: ContractRecord, index: number): ContractRecord {
-	const resolved = index > 0 // First record is unresolved, rest are resolved
+	const resolved = index > 2 // First record is unresolved, rest are resolved
 
 	if (resolved) {
 		return {

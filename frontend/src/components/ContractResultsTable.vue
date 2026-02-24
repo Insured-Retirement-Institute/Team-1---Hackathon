@@ -54,7 +54,7 @@ function toggleSelect(record: ContractRecord) {
 
 function getStatusBadgeType(status: ContractStatus): 'green' | 'yellow' | 'red' {
 	if (status === ContractStatus.Active) return 'green'
-	if (status === ContractStatus.ActiveRestricted) return 'yellow'
+	if (status === ContractStatus.ActiveRestricted || status === ContractStatus.Unappointed) return 'yellow'
 	return 'red'
 }
 </script>
@@ -175,12 +175,12 @@ function getStatusBadgeType(status: ContractStatus): 'green' | 'yellow' | 'red' 
 							</span>
 						</td>
 						<td class="px-6 py-4">
-							<FwbBadge :type="getStatusBadgeType(record.contractStatus)" class="inline-flex rounded-full">
+							<FwbBadge :type="getStatusBadgeType(record.contractStatus)" class="inline-flex rounded">
 								{{ record.contractStatus }}
 							</FwbBadge>
 						</td>
 						<td class="px-6 py-4 text-right">
-							<FwbButton v-if="record.contractStatus === ContractStatus.Unappointed" color="default">
+							<FwbButton v-if="record.contractStatus === ContractStatus.Unappointed" color="default" class="cursor-pointer">
 								Complete Training
 							</FwbButton>
 						</td>

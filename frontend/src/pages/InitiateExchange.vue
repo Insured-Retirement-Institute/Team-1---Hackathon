@@ -4,8 +4,8 @@ import BarcodeIcon from '@/icons/BarcodeIcon.svg'
 import UserIcon from '@/icons/UserIcon.svg'
 import ProfileCardIcon from '@/icons/ProfileCardIcon.svg'
 import CloseIcon from '@/icons/CloseIcon.svg'
+import CirclePlusIcon from '@/icons/CirclePlusIcon.svg'
 import { useContractResultsStore } from '@/stores/useContractResultsStore';
-import { onMounted } from 'vue';
 import { storeToRefs } from 'pinia';
 
 const contractResultsStore = useContractResultsStore()
@@ -59,8 +59,17 @@ if (searchContracts.value.length === 0) {
 					</FwbInput>
 				</div>
 
+
+			</div>
+
+			<div class="p-4">
 				<div class="w-1/3">
-					<FwbButton color="default" @click="contractResultsStore.addSearchContract">Add Additional Contract</FwbButton>
+					<FwbButton color="default" @click="contractResultsStore.addSearchContract" class="cursor-pointer">
+						<div class="flex items-center gap-2 ">
+							<CirclePlusIcon />
+							Add Additional Contract
+						</div>
+					</FwbButton>
 				</div>
 			</div>
 		</div>
