@@ -13,17 +13,23 @@ function generateNpn(): string {
   return Array.from({ length: 8 }, () => Math.floor(Math.random() * 10)).join('')
 }
 
-// Mock data matching the new Policy Inquiry spec schema
-const generateMockData = (carrierId: CarrierTable): BdChangeRequest[] => {
-  const carrierNames: Record<CarrierTable, string> = {
-    'carrier': 'Athene',
-    'carrier-2': 'Pacific Life'
+// Carrier configuration matching API specs and DynamoDB data
+const CARRIER_CONFIG: Record<CarrierTable, { carrierId: string; carrierName: string; policyPrefix: string }> = {
+  'carrier': {
+    carrierId: 'athene',
+    carrierName: 'Athene',
+    policyPrefix: 'ATH'
+  },
+  'carrier-2': {
+    carrierId: 'pacific-life',
+    carrierName: 'Pacific Life',
+    policyPrefix: 'PAC'
   }
+}
 
-  const policyPrefixes: Record<CarrierTable, string> = {
-    'carrier': 'ATH',
-    'carrier-2': 'PAC'
-  }
+// Mock data matching the Policy Inquiry API and Insurance Carrier API specs
+const generateMockData = (tableId: CarrierTable): BdChangeRequest[] => {
+  const config = CARRIER_CONFIG[tableId]
 
   const products: Record<CarrierTable, string[]> = {
     'carrier': [
@@ -80,8 +86,7 @@ const generateMockData = (carrierId: CarrierTable): BdChangeRequest[] => {
   const ownershipTypes = ['single', 'joint', 'trust', 'corporate'] as const
   const contractStatuses = ['active', 'surrendered', 'matured', 'lapsed', 'pending'] as const
 
-  const startPolicyNum = carrierId === 'carrier' ? 100001 : 200001
-  const prefix = policyPrefixes[carrierId]
+  const startPolicyNum = tableId === 'carrier' ? 100001 : 200001
   const records: BdChangeRequest[] = []
 
   for (let i = 0; i < 10; i++) {
@@ -111,12 +116,12 @@ const generateMockData = (carrierId: CarrierTable): BdChangeRequest[] => {
     const agentLast = getRandomElement([...agentLastNames])
 
     const record: BdChangeRequest = {
-      pk: `POLICY#${prefix}-${policyNum}`,
+      pk: `POLICY#${config.policyPrefix}-${policyNum}`,
       sk: `TRANSACTION#${crypto.randomUUID()}`,
       transactionId: crypto.randomUUID(),
-      policyNumber: `${prefix}-${policyNum}`,
-      carrierId: carrierId,
-      carrierName: carrierNames[carrierId],
+      policyNumber: `${config.policyPrefix}-${policyNum}`,
+      carrierId: config.carrierId,
+      carrierName: config.carrierName,
       currentStatus: status,
       statusHistory,
       createdAt: baseTime.toISOString(),
@@ -130,7 +135,7 @@ const generateMockData = (carrierId: CarrierTable): BdChangeRequest[] => {
       accountType: getRandomElement([...accountTypes]),
       planType: getRandomElement([...planTypes]),
       ownership: getRandomElement([...ownershipTypes]),
-      productName: getRandomElement([...products[carrierId]]),
+      productName: getRandomElement([...products[tableId]]),
       cusip: Math.random().toString(36).substring(2, 11).toUpperCase(),
       trailingCommission: Math.random() > 0.5,
       contractStatus: contractStatus,

@@ -20,10 +20,11 @@ paths:
         Accept policy inquiry request containing client account list from receiving broker-dealer.
         
         **Clearinghouse Response Behavior:**
-        - Always returns deferred response (no payload)
-        - Provides transactionId for tracking
-        - Internally routes request to appropriate delivering broker
-        - Status updated to MANIFEST_REQUESTED
+        - Can respond immediately with policy data (payload included) or defer processing (payload omitted)
+        - When deferred, routes request to appropriate delivering broker and returns acknowledgment
+        - When immediate, returns cached/pre-processed policy data directly
+        - Transaction ID must be reflected in any subsequent responses
+        - Status updated to MANIFEST_REQUESTED (deferred) or MANIFEST_RECEIVED (immediate)
       operationId: submitPolicyInquiryRequest
       parameters:
         - name: transactionId
@@ -772,7 +773,8 @@ components:
           type: string
           description: |
             Response code indicating the result status.
-            Examples: "RECEIVED", "PROCESSING", "DEFERRED"
+            Examples: "IMMEDIATE", "DEFERRED", "RECEIVED"
+          example: "IMMEDIATE"
         message:
           type: string
           description: Human-readable response message describing the operation result
@@ -781,22 +783,94 @@ components:
           format: uuid
           description: |
             Unique transaction identifier for tracking the request.
-            **Clearinghouse Behavior:** Always provided for request tracking.
-            The clearinghouse never returns payloads immediately - all responses are deferred.
+            Must be reflected in all subsequent related requests and responses.
         payload:
-          type: object
-          nullable: true
+          oneOf:
+            - $ref: '#/components/schemas/PolicyInquiryResponse'
+            - type: object
+              nullable: true
           description: |
-            Always null for clearinghouse responses.
-            **Clearinghouse Response Behavior:**
-            - Never includes payload data in responses
-            - All processing is deferred with transactionId provided for tracking
-            - Actual data delivery handled through separate callback mechanisms
-      example:
-        code: "RECEIVED"
-        message: "Policy inquiry request received and routed to delivering broker"
-        transactionId: "123e4567-e89b-12d3-a456-426614174000"
-        payload: null
+            Optional response payload containing the actual data.
+            **Clearinghouse Payload Behavior:**
+            - **Immediate responses**: Include full PolicyInquiryResponse payload from cache/pre-processed data
+            - **Deferred responses**: Payload is null, processing continues through broker routing
+            - When present, contains the complete policy inquiry response data
+        processingMode:
+          type: string
+          enum: [immediate, deferred, routed, cached]
+          description: |
+            Indicates how the request is being processed:
+            - immediate: Response payload included immediately from cache
+            - deferred: Processing will complete asynchronously through broker routing
+            - routed: Request forwarded to appropriate delivering broker
+            - cached: Response served from previously processed data
+        estimatedResponseTime:
+          type: string
+          description: |
+            Estimated completion time for deferred responses (ISO 8601 duration format).
+            Examples: "PT5M" (5 minutes), "PT1H" (1 hour), "P1D" (1 day)
+        routingInformation:
+          type: object
+          description: |
+            Information about request routing when processingMode is "routed".
+          properties:
+            deliveringBrokerId:
+              type: string
+              description: Identifier of the delivering broker handling the request
+            routedAt:
+              type: string
+              format: date-time
+              description: When the request was routed to the delivering broker
+      examples:
+        immediate_response:
+          summary: Immediate response with cached policy data
+          value:
+            code: "IMMEDIATE"
+            message: "Policy inquiry processed from cache"
+            transactionId: "123e4567-e89b-12d3-a456-426614174000"
+            payload:
+              requestingFirm:
+                firmName: "ABC Financial"
+                firmId: "ABCFIN001"
+                servicingAgent:
+                  agentName: "John Smith"
+                  npn: "12345678"
+              producerValidation:
+                agentName: "John Smith"
+                npn: "12345678"
+                errors: []
+              client:
+                clientName: "Jane Doe"
+                ssnLast4: "1234"
+                policies:
+                  - policyNumber: "POL123456"
+                    carrierName: "Pacific Life"
+                    accountType: "individual"
+                    planType: "nonQualified"
+                    ownership: "single"
+                    productName: "Pacific Destinations"
+                    cusip: "694308AB1"
+                    trailingCommission: true
+                    contractStatus: "active"
+                    withdrawalStructure:
+                      systematicInPlace: false
+                    errors: []
+              enums:
+                accountType: ["individual", "joint", "trust", "custodial", "entity"]
+                planType: ["nonQualified", "rothIra", "traditionalIra", "sep", "simple"]
+            processingMode: "cached"
+        deferred_response:
+          summary: Deferred response routed to broker
+          value:
+            code: "DEFERRED"
+            message: "Policy inquiry request routed to delivering broker"
+            transactionId: "123e4567-e89b-12d3-a456-426614174000"
+            payload: null
+            processingMode: "routed"
+            estimatedResponseTime: "PT30M"
+            routingInformation:
+              deliveringBrokerId: "DELIVERING_BROKER_001"
+              routedAt: "2024-02-24T15:30:00Z"
 
     ProducerError:
       type: object

@@ -655,25 +655,125 @@ components:
       required:
         - code
         - message
+        - transactionId
       properties:
         code:
           type: string
-          description: Response code indicating the result status
-          example: "RECEIVED"
+          description: |
+            Response code indicating the result status.
+            Examples: "IMMEDIATE", "DEFERRED", "RECEIVED"
+          example: "IMMEDIATE"
         message:
           type: string
           description: Human-readable response message describing the operation result
+        transactionId:
+          type: string
+          format: uuid
+          description: |
+            Unique transaction identifier for tracking the request.
+            Must be reflected in all subsequent related requests and responses.
         payload:
-          type: object
+          oneOf:
+            - $ref: '#/components/schemas/PolicyInquiryResponse'
+            - type: object
+              nullable: true
           description: |
             Optional response payload containing the actual data.
-            **Payload Behavior:**
-            - **Broker responses**: May include payload for immediate responses, omitted for deferred processing
-            - **Clearinghouse responses**: Never included - always deferred processing only
-            - When present, contains the specific response data (e.g., PolicyInquiryResponse for policy queries)
-      example:
-        code: "DEFERRED"
-        message: "Policy inquiry request received and queued for processing"
+            **Broker Payload Behavior:**
+            - **Immediate responses**: Include full PolicyInquiryResponse payload
+            - **Deferred responses**: Payload is null, processing continues asynchronously
+            - **Direct carrier requests**: May include immediate carrier response data
+            - When present, contains the complete policy inquiry response data
+        processingMode:
+          type: string
+          enum: [immediate, deferred, queued, routed]
+          description: |
+            Indicates how the request is being processed:
+            - immediate: Response payload included immediately
+            - deferred: Processing will complete asynchronously
+            - queued: Request queued for batch processing
+            - routed: Request forwarded to another system (e.g., carrier, clearinghouse)
+        estimatedResponseTime:
+          type: string
+          description: |
+            Estimated completion time for deferred responses (ISO 8601 duration format).
+            Examples: "PT5M" (5 minutes), "PT1H" (1 hour), "P1D" (1 day)
+        routingInformation:
+          type: object
+          description: |
+            Information about request routing for direct carrier access.
+            Present when processingMode is "routed".
+          properties:
+            targetType:
+              type: string
+              enum: [carrier, clearinghouse]
+              description: Type of target system for routing
+            targetId:
+              type: string
+              description: Identifier of the target system
+            routedAt:
+              type: string
+              format: date-time
+              description: When the request was routed
+      examples:
+        immediate_response:
+          summary: Immediate response with policy data
+          value:
+            code: "IMMEDIATE"
+            message: "Policy inquiry processed successfully"
+            transactionId: "123e4567-e89b-12d3-a456-426614174000"
+            payload:
+              requestingFirm:
+                firmName: "ABC Financial"
+                firmId: "ABCFIN001"
+                servicingAgent:
+                  agentName: "John Smith"
+                  npn: "12345678"
+              producerValidation:
+                agentName: "John Smith"
+                npn: "12345678"
+                errors: []
+              client:
+                clientName: "Jane Doe"
+                ssnLast4: "1234"
+                policies:
+                  - policyNumber: "POL123456"
+                    carrierName: "Pacific Life"
+                    accountType: "individual"
+                    planType: "nonQualified"
+                    ownership: "single"
+                    productName: "Pacific Destinations"
+                    cusip: "694308AB1"
+                    trailingCommission: true
+                    contractStatus: "active"
+                    withdrawalStructure:
+                      systematicInPlace: false
+                    errors: []
+              enums:
+                accountType: ["individual", "joint", "trust", "custodial", "entity"]
+                planType: ["nonQualified", "rothIra", "traditionalIra", "sep", "simple"]
+            processingMode: "immediate"
+        deferred_response:
+          summary: Deferred response
+          value:
+            code: "DEFERRED"
+            message: "Policy inquiry request received and queued for processing"
+            transactionId: "123e4567-e89b-12d3-a456-426614174000"
+            payload: null
+            processingMode: "deferred"
+            estimatedResponseTime: "PT15M"
+        routed_to_carrier:
+          summary: Request routed directly to carrier
+          value:
+            code: "ROUTED"
+            message: "Policy inquiry request forwarded to carrier"
+            transactionId: "123e4567-e89b-12d3-a456-426614174000"
+            payload: null
+            processingMode: "routed"
+            routingInformation:
+              targetType: "carrier"
+              targetId: "PACIFIC_LIFE_001"
+              routedAt: "2024-02-24T15:30:00Z"
 
     ProducerError:
       type: object
@@ -723,9 +823,69 @@ components:
           type: string
           description: Human-readable error message
 
-  # Note: Outbound API calls that broker-dealers make to clearinghouse are documented separately
-  # These would include:
+  # OUTBOUND API CALLS AND DIRECT CARRIER ACCESS
+  #
+  # Broker-dealers make outbound calls to both clearinghouse and carriers depending on the routing pattern:
+  #
+  # CLEARINGHOUSE ROUTING (Traditional Flow):
   # - POST to clearinghouse /submit-policy-inquiry-request (from receiving broker)
   # - POST to clearinghouse /submit-policy-inquiry-response (from delivering broker)
   # - POST to clearinghouse /receive-bd-change-request (from receiving broker)
   # - POST to clearinghouse /receive-transfer-confirmation (from delivering broker)
+  #
+  # DIRECT CARRIER ACCESS (New Pattern):
+  # - POST to carrier /submit-policy-inquiry-request (from any broker, bypassing clearinghouse)
+  # - This allows brokers to call carriers directly when:
+  #   * Policy-to-carrier mapping is known
+  #   * Faster response times are required
+  #   * Carrier supports direct broker integration
+  #   * Clearinghouse routing is unavailable
+  #
+  # POLICY-TO-CARRIER DISCOVERY:
+  # Brokers can determine the appropriate carrier using:
+  # 1. Policy number prefix/format patterns
+  # 2. Industry databases (NAIC company codes, etc.)
+  # 3. Previous transaction history
+  # 4. Carrier-specific policy registries
+  # 5. Fallback to clearinghouse routing when carrier cannot be determined
+  #
+  # DIRECT CARRIER REQUEST FLOW:
+  # 1. Receiving broker determines carrier from policy numbers
+  # 2. Broker calls carrier /submit-policy-inquiry-request directly
+  # 3. Carrier responds immediately (payload included) or defers (payload null)
+  # 4. For deferred responses, carrier calls clearinghouse /submit-policy-inquiry-response
+  # 5. Clearinghouse forwards response to receiving broker via /receive-policy-inquiry-response
+  #
+  # RESPONSE CONSISTENCY:
+  # - Transaction IDs must be consistent across all systems (broker -> carrier -> clearinghouse)
+  # - Response format is identical whether coming from clearinghouse or direct carrier
+  # - Error handling and validation patterns remain consistent
+  # - Status tracking works across both routing patterns
+  #
+  # EXAMPLE DIRECT CARRIER CALLS:
+  # 
+  # Request to Pacific Life carrier:
+  # POST https://api.pacificlife.com/v1/submit-policy-inquiry-request
+  # Headers:
+  #   transactionId: 123e4567-e89b-12d3-a456-426614174000
+  #   Content-Type: application/json
+  # Body: { PolicyInquiryRequest payload }
+  #
+  # Immediate Response:
+  # {
+  #   "code": "IMMEDIATE",
+  #   "message": "Policy inquiry processed successfully",
+  #   "transactionId": "123e4567-e89b-12d3-a456-426614174000",
+  #   "payload": { PolicyInquiryResponse with full policy data },
+  #   "processingMode": "immediate"
+  # }
+  #
+  # Deferred Response:
+  # {
+  #   "code": "DEFERRED", 
+  #   "message": "Policy inquiry queued for processing",
+  #   "transactionId": "123e4567-e89b-12d3-a456-426614174000",
+  #   "payload": null,
+  #   "processingMode": "deferred",
+  #   "estimatedResponseTime": "PT10M"
+  # }

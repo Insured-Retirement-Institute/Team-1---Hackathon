@@ -13,6 +13,93 @@ servers:
     description: Staging server
 
 paths:
+  /submit-policy-inquiry-request:
+    post:
+      summary: Receive policy inquiry request (direct or via clearinghouse)
+      description: |
+        Accept policy inquiry request to provide policy information for specified accounts.
+        
+        **Response Behavior:**
+        - Carrier can respond immediately with policy data (payload included) or defer processing (payload omitted)
+        - When deferred, only code/message/transactionId are returned
+        - Transaction ID must be reflected in any subsequent responses
+        - Supports both direct broker requests and clearinghouse-routed requests
+      operationId: submitPolicyInquiryRequest
+      parameters:
+        - name: transactionId
+          in: header
+          required: true
+          description: Unique transaction identifier that flows through all related requests
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PolicyInquiryRequest'
+      responses:
+        '200':
+          description: Policy inquiry request received successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardResponse'
+        '400':
+          description: Bad request - invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /submit-policy-inquiry-response:
+    post:
+      summary: Submit policy inquiry response to clearinghouse
+      description: |
+        Submit detailed policy information response to clearinghouse after processing a deferred request.
+        Used when the carrier initially responded with deferred processing.
+      operationId: submitPolicyInquiryResponse
+      parameters:
+        - name: transactionId
+          in: header
+          required: true
+          description: Unique transaction identifier that flows through all related requests
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PolicyInquiryResponse'
+      responses:
+        '200':
+          description: Policy inquiry response submitted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardResponse'
+        '400':
+          description: Bad request - invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /receive-bd-change-request:
     post:
       summary: Receive BD change validation request from clearinghouse
@@ -126,6 +213,258 @@ paths:
 
 components:
   schemas:
+    PolicyInquiryRequest:
+      type: object
+      required:
+        - requestingFirm
+        - client
+      properties:
+        requestingFirm:
+          type: object
+          required:
+            - firmName
+            - firmId
+            - servicingAgent
+          properties:
+            firmName:
+              type: string
+              nullable: true
+              description: Name of the requesting firm
+            firmId:
+              type: string
+              nullable: true
+              description: Identifier of the requesting firm
+            servicingAgent:
+              type: object
+              required:
+                - agentName
+                - npn
+              properties:
+                agentName:
+                  type: string
+                  nullable: true
+                  description: Name of the servicing agent
+                npn:
+                  type: string
+                  nullable: true
+                  description: National Producer Number of the agent
+        client:
+          type: object
+          required:
+            - clientName
+            - ssn
+            - policyNumbers
+          properties:
+            clientName:
+              type: string
+              nullable: true
+              description: Name of the client
+            ssn:
+              type: string
+              nullable: true
+              description: Social Security Number of the client
+            policyNumbers:
+              type: array
+              items:
+                type: string
+              description: List of policy numbers for the client
+
+    PolicyInquiryResponse:
+      type: object
+      required:
+        - requestingFirm
+        - producerValidation
+        - client
+        - enums
+      properties:
+        requestingFirm:
+          type: object
+          required:
+            - firmName
+            - firmId
+            - servicingAgent
+          properties:
+            firmName:
+              type: string
+              nullable: true
+              description: Echoed requesting firm name from the request
+            firmId:
+              type: string
+              nullable: true
+              description: Echoed DTCC firm identifier from the request
+            servicingAgent:
+              type: object
+              required:
+                - agentName
+                - npn
+              properties:
+                agentName:
+                  type: string
+                  nullable: true
+                  description: Echoed agent name from the request
+                npn:
+                  type: string
+                  nullable: true
+                  description: Echoed NPN from the request
+        producerValidation:
+          type: object
+          required:
+            - agentName
+            - npn
+            - errors
+          properties:
+            agentName:
+              type: string
+              nullable: true
+              description: Echoed agent name from the request
+            npn:
+              type: string
+              nullable: true
+              description: Echoed NPN from the request
+            errors:
+              type: array
+              items:
+                $ref: '#/components/schemas/ProducerError'
+              description: Producer-level validation errors
+        client:
+          type: object
+          required:
+            - clientName
+            - ssnLast4
+            - policies
+          properties:
+            clientName:
+              type: string
+              nullable: true
+              description: Client name echoed back for confirmation
+            ssnLast4:
+              type: string
+              nullable: true
+              description: Last four digits of the client's SSN for security
+            policies:
+              type: array
+              items:
+                $ref: '#/components/schemas/DetailedPolicyInfo'
+              description: List of policy details
+        enums:
+          type: object
+          required:
+            - accountType
+            - planType
+          properties:
+            accountType:
+              type: array
+              items:
+                type: string
+                enum: [individual, joint, trust, custodial, entity]
+              description: Valid account type values
+            planType:
+              type: array
+              items:
+                type: string
+                enum: [nonQualified, rothIra, traditionalIra, sep, simple]
+              description: Valid plan type values
+
+    DetailedPolicyInfo:
+      type: object
+      required:
+        - policyNumber
+        - carrierName
+        - accountType
+        - planType
+        - ownership
+        - productName
+        - cusip
+        - trailingCommission
+        - contractStatus
+        - withdrawalStructure
+        - errors
+      properties:
+        policyNumber:
+          type: string
+          nullable: true
+          description: Policy number identifying the policy
+        carrierName:
+          type: string
+          nullable: true
+          description: Name of the insurance carrier that wrote the annuity
+        accountType:
+          type: string
+          enum: [individual, joint, trust, custodial, entity]
+          nullable: true
+          description: Registration type of the account
+        planType:
+          type: string
+          enum: [nonQualified, rothIra, traditionalIra, sep, simple]
+          nullable: true
+          description: Tax qualification type of the account
+        ownership:
+          type: string
+          nullable: true
+          description: Ownership structure of the policy
+        productName:
+          type: string
+          nullable: true
+          description: Name of the annuity product
+        cusip:
+          type: string
+          nullable: true
+          description: CUSIP identifier for the product
+        trailingCommission:
+          type: boolean
+          description: Whether trailing commission will apply to the new servicing agent
+        contractStatus:
+          type: string
+          nullable: true
+          description: Current status of the contract
+        withdrawalStructure:
+          type: object
+          required:
+            - systematicInPlace
+          properties:
+            systematicInPlace:
+              type: boolean
+              description: Whether a systematic withdrawal plan is currently active
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/PolicyError'
+          description: Any errors or issues associated with this policy
+
+    ProducerError:
+      type: object
+      required:
+        - errorCode
+        - message
+      properties:
+        errorCode:
+          type: string
+          enum: [notAppointed, notLicensed, affiliationMismatch]
+          description: Specific producer error code identifying the type of error
+        message:
+          type: string
+          description: Human-readable error message
+      example:
+        errorCode: "notAppointed"
+        message: "Producer is not appointed with Pacific Life"
+
+    PolicyError:
+      type: object
+      required:
+        - errorCode
+        - message
+      properties:
+        errorCode:
+          type: string
+          enum: [ssnContractMismatch, proprietaryProduct, policyInactive, policyRestricted]
+          description: Specific error code identifying the type of error
+        message:
+          type: string
+          description: Human-readable error message
+      example:
+        errorCode: "ssnContractMismatch"
+        message: "Client's SSN does not match the contract on file"
+
     BdChangeRequest:
       type: object
       required:
@@ -270,21 +609,82 @@ components:
       required:
         - code
         - message
+        - transactionId
       properties:
         code:
           type: string
-          description: Response code indicating the result status
-          example: "RECEIVED"
+          description: |
+            Response code indicating the result status.
+            Examples: "IMMEDIATE", "DEFERRED", "RECEIVED"
+          example: "IMMEDIATE"
         message:
           type: string
           description: Human-readable response message describing the operation result
-        processingStatus:
+        transactionId:
           type: string
-          enum: [received, processing, deferred]
-          description: How the request will be handled
+          format: uuid
+          description: |
+            Unique transaction identifier for tracking the request.
+            Must be reflected in all subsequent related requests and responses.
+        payload:
+          oneOf:
+            - $ref: '#/components/schemas/PolicyInquiryResponse'
+            - type: object
+              nullable: true
+          description: |
+            Optional response payload containing the actual data.
+            **Carrier Payload Behavior:**
+            - **Immediate responses**: Include full PolicyInquiryResponse payload
+            - **Deferred responses**: Payload is null, processing continues asynchronously
+            - When present, contains the complete policy inquiry response data
+        processingMode:
+          type: string
+          enum: [immediate, deferred, queued]
+          description: |
+            Indicates how the request is being processed:
+            - immediate: Response payload included immediately
+            - deferred: Processing will complete asynchronously
+            - queued: Request queued for batch processing
         estimatedResponseTime:
           type: string
-          description: Estimated time for validation response (if deferred)
+          description: |
+            Estimated completion time for deferred responses (ISO 8601 duration format).
+            Examples: "PT5M" (5 minutes), "PT1H" (1 hour), "P1D" (1 day)
+      example:
+        code: "IMMEDIATE"
+        message: "Policy inquiry processed successfully"
+        transactionId: "123e4567-e89b-12d3-a456-426614174000"
+        payload:
+          requestingFirm:
+            firmName: "ABC Financial"
+            firmId: "ABCFIN001"
+            servicingAgent:
+              agentName: "John Smith"
+              npn: "12345678"
+          producerValidation:
+            agentName: "John Smith"
+            npn: "12345678"
+            errors: []
+          client:
+            clientName: "Jane Doe"
+            ssnLast4: "1234"
+            policies:
+              - policyNumber: "POL123456"
+                carrierName: "Pacific Life"
+                accountType: "individual"
+                planType: "nonQualified"
+                ownership: "single"
+                productName: "Pacific Destinations"
+                cusip: "694308AB1"
+                trailingCommission: true
+                contractStatus: "active"
+                withdrawalStructure:
+                  systematicInPlace: false
+                errors: []
+          enums:
+            accountType: ["individual", "joint", "trust", "custodial", "entity"]
+            planType: ["nonQualified", "rothIra", "traditionalIra", "sep", "simple"]
+        processingMode: "immediate"
 
     ErrorResponse:
       type: object
