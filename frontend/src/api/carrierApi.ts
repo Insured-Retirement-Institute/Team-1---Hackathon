@@ -8,27 +8,43 @@ function getRandomElement<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)] as T
 }
 
+// Generate random NPN
+function generateNpn(): string {
+  return Array.from({ length: 8 }, () => Math.floor(Math.random() * 10)).join('')
+}
+
 // Mock data matching the new Policy Inquiry spec schema
 const generateMockData = (carrierId: CarrierTable): BdChangeRequest[] => {
   const carrierNames: Record<CarrierTable, string> = {
-    'carrier': 'Athene Annuity',
-    'carrier-2': 'Nationwide Insurance'
+    'carrier': 'Athene',
+    'carrier-2': 'Pacific Life'
+  }
+
+  const policyPrefixes: Record<CarrierTable, string> = {
+    'carrier': 'ATH',
+    'carrier-2': 'PAC'
   }
 
   const products: Record<CarrierTable, string[]> = {
     'carrier': [
-      'Athene Amplify Fixed Indexed Annuity',
-      'Athene Benefit 10 Fixed Annuity',
-      'Athene Agility Fixed Indexed Annuity',
-      'Athene MaxRate Plus Annuity',
-      'Athene Performance Elite Plus',
+      'Athene Accumulator 7',
+      'Athene Agility 10',
+      'Athene Amplify 3.0',
+      'Athene MaxRate 3',
+      'Athene MYG 4 ROP',
+      'Athene MYG 5 MVA',
+      'Athene MYG 6',
     ],
     'carrier-2': [
-      'Nationwide New Heights Fixed Indexed Annuity',
-      'Nationwide Destination Navigator 2.0',
-      'Nationwide Peak 10 Annuity',
-      'Nationwide Monument Advisor',
-      'Nationwide Defined Protection Annuity',
+      'Pacific Protective Growth',
+      'Pacific Index Income',
+      'Pacific Index Foundation 2',
+      'Pacific Index Edge',
+      'Pacific Index Advisory',
+      'Pacific Index Foundation',
+      'Pacific Income Provider',
+      'Pacific Secure Income',
+      'Pacific Expedition 2',
     ]
   }
 
@@ -42,6 +58,9 @@ const generateMockData = (carrierId: CarrierTable): BdChangeRequest[] => {
     { name: 'David Martinez', ssn: '1357' },
     { name: 'Linda Wilson', ssn: '8642' },
   ] as const
+
+  const agentFirstNames = ['Brian', 'Stephanie', 'Kevin', 'Amanda', 'Jason', 'Nicole', 'Ryan', 'Melissa']
+  const agentLastNames = ['Adams', 'Baker', 'Campbell', 'Douglas', 'Edwards', 'Foster', 'Graham', 'Hayes']
 
   const statuses = [
     'MANIFEST_REQUESTED',
@@ -62,6 +81,7 @@ const generateMockData = (carrierId: CarrierTable): BdChangeRequest[] => {
   const contractStatuses = ['active', 'surrendered', 'matured', 'lapsed', 'pending'] as const
 
   const startPolicyNum = carrierId === 'carrier' ? 100001 : 200001
+  const prefix = policyPrefixes[carrierId]
   const records: BdChangeRequest[] = []
 
   for (let i = 0; i < 10; i++) {
@@ -87,11 +107,14 @@ const generateMockData = (carrierId: CarrierTable): BdChangeRequest[] => {
       })
     }
 
+    const agentFirst = getRandomElement([...agentFirstNames])
+    const agentLast = getRandomElement([...agentLastNames])
+
     const record: BdChangeRequest = {
-      pk: `POLICY#POL-${policyNum}`,
+      pk: `POLICY#${prefix}-${policyNum}`,
       sk: `TRANSACTION#${crypto.randomUUID()}`,
       transactionId: crypto.randomUUID(),
-      policyNumber: `POL-${policyNum}`,
+      policyNumber: `${prefix}-${policyNum}`,
       carrierId: carrierId,
       carrierName: carrierNames[carrierId],
       currentStatus: status,
@@ -100,6 +123,10 @@ const generateMockData = (carrierId: CarrierTable): BdChangeRequest[] => {
       updatedAt: new Date().toISOString(),
       clientName: client.name,
       ssnLast4: client.ssn,
+      servicingAgent: {
+        agentName: `${agentFirst} ${agentLast}`,
+        npn: generateNpn()
+      },
       accountType: getRandomElement([...accountTypes]),
       planType: getRandomElement([...planTypes]),
       ownership: getRandomElement([...ownershipTypes]),
