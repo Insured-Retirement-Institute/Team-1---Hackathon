@@ -35,7 +35,7 @@ function formatPlanType(planType: string) {
   <div class="bg-white shadow-sm rounded-lg overflow-hidden">
     <div class="px-4 py-3 border-b border-gray-200 bg-gray-50">
       <h2 class="text-sm font-semibold text-gray-700 uppercase tracking-wider">
-        BD Change Requests ({{ policies.length }})
+        Policy List ({{ policies.length }})
       </h2>
     </div>
     <ul class="divide-y divide-gray-200 max-h-[600px] overflow-auto">
