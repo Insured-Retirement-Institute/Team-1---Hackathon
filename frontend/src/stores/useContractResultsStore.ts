@@ -127,6 +127,10 @@ function generateFakeDtccResult(searchContract: ContractRecord, index: number): 
 		contractStatus = randomEnumValue(ContractStatus)
 	}
 
+	if (contractStatus === ContractStatus.Unappointed) {
+		contractStatus = ContractStatus.Inactive
+	}
+
 	if (resolved) {
 		const carrierName = randomElement(CARRIER_NAMES)
 		const productName = CARRIER_PRODUCTS[carrierName]!
