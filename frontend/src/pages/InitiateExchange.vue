@@ -4,13 +4,13 @@ import BarcodeIcon from '@/icons/BarcodeIcon.svg'
 import UserIcon from '@/icons/UserIcon.svg'
 import ProfileCardIcon from '@/icons/ProfileCardIcon.svg'
 import CloseIcon from '@/icons/CloseIcon.svg'
+import CirclePlusIcon from '@/icons/CirclePlusIcon.svg'
 import { useContractResultsStore } from '@/stores/useContractResultsStore';
-import { onMounted } from 'vue';
 import { storeToRefs } from 'pinia';
 
 const contractResultsStore = useContractResultsStore()
 
-const { searchContracts } = storeToRefs(contractResultsStore)
+const { searchContracts, clientSearch } = storeToRefs(contractResultsStore)
 
 if (searchContracts.value.length === 0) {
 	contractResultsStore.addSearchContract()
@@ -24,7 +24,7 @@ if (searchContracts.value.length === 0) {
 		<div class="p-10 bg-[#f8f8f8] rounded-xl mb-4">
 			<div class="flex flex-wrap *:p-4 items-center">
 				<div class="w-1/3">
-					<FwbInput label="First Name">
+					<FwbInput v-model="clientSearch.firstName" label="First Name">
 						<template #prefix>
 							<UserIcon />
 						</template>
@@ -32,7 +32,7 @@ if (searchContracts.value.length === 0) {
 				</div>
 
 				<div class="w-1/3">
-					<FwbInput label="First Name">
+					<FwbInput v-model="clientSearch.lastName" label="Last Name">
 						<template #prefix>
 							<UserIcon />
 						</template>
@@ -40,7 +40,7 @@ if (searchContracts.value.length === 0) {
 				</div>
 
 				<div class="w-1/3">
-					<FwbInput label="First Name">
+					<FwbInput v-model="clientSearch.ssn" label="SSN">
 						<template #prefix>
 							<ProfileCardIcon />
 						</template>
@@ -59,8 +59,17 @@ if (searchContracts.value.length === 0) {
 					</FwbInput>
 				</div>
 
+
+			</div>
+
+			<div class="p-4">
 				<div class="w-1/3">
-					<FwbButton color="default" @click="contractResultsStore.addSearchContract">Add Additional Contract</FwbButton>
+					<FwbButton color="default" @click="contractResultsStore.addSearchContract" class="cursor-pointer">
+						<div class="flex items-center gap-2 ">
+							<CirclePlusIcon />
+							Add Additional Contract
+						</div>
+					</FwbButton>
 				</div>
 			</div>
 		</div>

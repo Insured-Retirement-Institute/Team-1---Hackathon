@@ -31,12 +31,14 @@ async function handleNavigation(meta: RouteMeta) {
 				v-if="route.meta.previous"
 				color="default"
 				@click="handleNavigation(route.meta.previous as RouteMeta)"
+				class="cursor-pointer"
 			>Back</FwbButton>
 
 			<FwbButton
 				v-if="route.meta.next"
 				color="default"
 				@click="handleNavigation(route.meta.next as RouteMeta)"
+				class="cursor-pointer"
 			>Next</FwbButton>
 		</div>
 	</div>

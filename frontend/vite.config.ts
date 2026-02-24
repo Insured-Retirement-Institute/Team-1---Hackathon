@@ -25,13 +25,6 @@ export default defineConfig({
 		watch: {
 			usePolling: true,
 		},
-		// proxy: {
-		// 	"/api": {
-		// 		target: "https://jsonplaceholder.typicode.com",
-		// 		changeOrigin: true,
-		// 		rewrite: (path) => path.replace(/^\/api/, ""), // Removes '/api' before sending to backend
-		// 		secure: false,
-		// 	},
-		// },
+		cors: true
 	},
 });

@@ -1,3 +1,5 @@
+import type { PolicyError, WithdrawalStructure } from './ClearinghouseApi'
+
 export enum ContractStatus {
 	ProprietaryProduct = 'Proprietary Product',
 	NotActive = 'Not Active',
@@ -33,19 +35,31 @@ export enum OwnershipType {
 	EntityAccount = 'Entity Account'
 }
 
+// ContractRecord is a superset of DetailedPolicyInfo from the API
 export interface ContractRecord {
+	// Internal fields
 	id: string | number
+	selected?: boolean
+	dtccResolved?: boolean
+
+	// Maps to DetailedPolicyInfo.policyNumber
+	contractNumber: string
+
+	// Direct mappings from DetailedPolicyInfo
 	carrierName: string
 	productName: string
-	contractNumber: string
-	cusipNumber: string
+	cusipNumber: string // Maps to DetailedPolicyInfo.cusip
 	ownership: OwnershipType | string
 	planType?: PlanType
 	accountType?: AccountType
-	ownerName?: string
-	trailing: boolean
-	withdrawalProgram: boolean
+	trailing: boolean // Maps to DetailedPolicyInfo.trailingCommission
 	contractStatus: ContractStatus
-	dtccResolved?: boolean
-	selected?: boolean
+	withdrawalProgram: boolean // Maps to DetailedPolicyInfo.withdrawalStructure.systematicInPlace
+
+	// Additional fields from DetailedPolicyInfo
+	withdrawalStructure?: WithdrawalStructure
+	errors?: PolicyError[]
+
+	// Extended fields not in DetailedPolicyInfo
+	ownerName?: string
 }
