@@ -1,464 +1,191 @@
-import type { BdChangeRequest, CarrierTable } from '@/types/carrier'
+import type { BdChangeRequest, CarrierTable, StatusHistoryItem } from '@/types/carrier'
 
-// Mock data for carrier tables
-const carrierMockData: BdChangeRequest[] = [
-  {
-    pk: 'POLICY#POL-100001',
-    sk: 'TRANSACTION#a1b2c3d4-e5f6-7890-abcd-ef1234567890',
-    'transaction-id': 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
-    'policy-id': 'POL-100001',
-    'carrier-id': 'carrier',
-    'receiving-broker-id': 'BD-2002',
-    'delivering-broker-id': 'BD-1001',
-    'request-timestamp': '2026-02-20T09:00:00Z',
-    'current-status': 'COMPLETE',
-    'status-history': [
-      { status: 'MANIFEST_REQUESTED', timestamp: '2026-02-20T09:00:00Z', notes: 'Initial request' },
-      { status: 'MANIFEST_RECEIVED', timestamp: '2026-02-20T10:00:00Z' },
-      { status: 'DUE_DILIGENCE_COMPLETE', timestamp: '2026-02-20T14:00:00Z' },
-      { status: 'CARRIER_VALIDATION_PENDING', timestamp: '2026-02-20T15:00:00Z' },
-      { status: 'CARRIER_APPROVED', timestamp: '2026-02-20T16:00:00Z', notes: 'All validation checks passed' },
-      { status: 'TRANSFER_INITIATED', timestamp: '2026-02-21T09:00:00Z' },
-      { status: 'TRANSFER_PROCESSING', timestamp: '2026-02-21T10:00:00Z' },
-      { status: 'TRANSFER_CONFIRMED', timestamp: '2026-02-21T14:00:00Z' },
-      { status: 'COMPLETE', timestamp: '2026-02-21T15:00:00Z', notes: 'BD change completed successfully' },
-    ],
-    'effective-date': '2026-03-01',
-    'policy-details': {
-      cusip: 'ABC123XYZ',
-      'product-name': 'Nationwide New Heights Fixed Indexed Annuity',
-      'owner-ssn': '123-45-6789',
-      'owner-name': 'John Smith',
-      'annuity-type': 'Indexed',
-      'account-type': 'IRA',
-      'issue-state': 'CA',
-      'custodial-indicator': 'N',
-    },
-    'broker-details': {
-      'receiving-broker': {
-        'broker-id': 'BD-2002',
-        'broker-name': 'Morgan Stanley Wealth Management',
-        'crd-number': '149777',
-        npn: '12345678',
-      },
-      'delivering-broker': {
-        'broker-id': 'BD-1001',
-        'broker-name': 'Edward Jones',
-        'crd-number': '250',
-      },
-    },
-    'validation-requirements': {
-      'requires-licensing-check': true,
-      'requires-appointment-check': true,
-      'requires-suitability-check': true,
-      'state-specific-rules': false,
-    },
-    'carrier-validation-details': {
-      'validation-result': 'approved',
-      'validation-checks': {
-        'licensing-check': 'passed',
-        'appointment-check': 'passed',
-        'suitability-check': 'passed',
-        'policy-rules-check': 'passed',
-      },
-      'validated-at': '2026-02-20T16:00:00Z',
-    },
-  },
-  {
-    pk: 'POLICY#POL-100002',
-    sk: 'TRANSACTION#b2c3d4e5-f6a7-8901-bcde-f23456789012',
-    'transaction-id': 'b2c3d4e5-f6a7-8901-bcde-f23456789012',
-    'policy-id': 'POL-100002',
-    'carrier-id': 'carrier',
-    'receiving-broker-id': 'BD-3003',
-    'delivering-broker-id': 'BD-4004',
-    'request-timestamp': '2026-02-19T11:00:00Z',
-    'current-status': 'CARRIER_REJECTED',
-    'status-history': [
-      { status: 'MANIFEST_REQUESTED', timestamp: '2026-02-19T11:00:00Z' },
-      { status: 'MANIFEST_RECEIVED', timestamp: '2026-02-19T12:30:00Z' },
-      { status: 'DUE_DILIGENCE_COMPLETE', timestamp: '2026-02-19T15:00:00Z' },
-      { status: 'CARRIER_VALIDATION_PENDING', timestamp: '2026-02-19T16:00:00Z' },
-      { status: 'CARRIER_REJECTED', timestamp: '2026-02-20T10:00:00Z', notes: 'Agent not licensed in policy state' },
-    ],
-    'effective-date': '2026-03-15',
-    'policy-details': {
-      cusip: 'DEF456ABC',
-      'product-name': 'Jackson National Perspective II Variable Annuity',
-      'owner-ssn': '987-65-4321',
-      'owner-name': 'Jane Doe',
-      'annuity-type': 'Variable',
-      'account-type': 'Roth IRA',
-      'issue-state': 'TX',
-      'custodial-indicator': 'Y',
-    },
-    'broker-details': {
-      'receiving-broker': {
-        'broker-id': 'BD-3003',
-        'broker-name': 'Merrill Lynch',
-        'crd-number': '7691',
-        npn: '87654321',
-      },
-      'delivering-broker': {
-        'broker-id': 'BD-4004',
-        'broker-name': 'Raymond James',
-        'crd-number': '705',
-      },
-    },
-    'validation-requirements': {
-      'requires-licensing-check': true,
-      'requires-appointment-check': true,
-      'requires-suitability-check': false,
-      'state-specific-rules': true,
-    },
-    'carrier-validation-details': {
-      'validation-result': 'rejected',
-      'validation-checks': {
-        'licensing-check': 'failed',
-        'appointment-check': 'passed',
-        'suitability-check': 'passed',
-        'policy-rules-check': 'passed',
-      },
-      'validated-at': '2026-02-20T10:00:00Z',
-      'rejection-reason': 'Agent not licensed in policy state',
-    },
-  },
-  {
-    pk: 'POLICY#POL-100003',
-    sk: 'TRANSACTION#c3d4e5f6-a7b8-9012-cdef-345678901234',
-    'transaction-id': 'c3d4e5f6-a7b8-9012-cdef-345678901234',
-    'policy-id': 'POL-100003',
-    'carrier-id': 'carrier',
-    'receiving-broker-id': 'BD-1001',
-    'delivering-broker-id': 'BD-2002',
-    'request-timestamp': '2026-02-22T08:00:00Z',
-    'current-status': 'CARRIER_VALIDATION_PENDING',
-    'status-history': [
-      { status: 'MANIFEST_REQUESTED', timestamp: '2026-02-22T08:00:00Z' },
-      { status: 'MANIFEST_RECEIVED', timestamp: '2026-02-22T09:30:00Z' },
-      { status: 'DUE_DILIGENCE_COMPLETE', timestamp: '2026-02-22T14:00:00Z' },
-      { status: 'CARRIER_VALIDATION_PENDING', timestamp: '2026-02-22T15:00:00Z' },
-    ],
-    'effective-date': '2026-03-20',
-    'policy-details': {
-      cusip: 'GHI789DEF',
-      'product-name': 'Lincoln OptiBlend Fixed Indexed Annuity',
-      'owner-ssn': '555-12-3456',
-      'owner-name': 'Robert Johnson',
-      'annuity-type': 'Fixed',
-      'account-type': 'Non-Qualified',
-      'issue-state': 'NY',
-      'custodial-indicator': 'N',
-    },
-    'broker-details': {
-      'receiving-broker': {
-        'broker-id': 'BD-1001',
-        'broker-name': 'Edward Jones',
-        'crd-number': '250',
-        npn: '11223344',
-      },
-      'delivering-broker': {
-        'broker-id': 'BD-2002',
-        'broker-name': 'Morgan Stanley Wealth Management',
-        'crd-number': '149777',
-      },
-    },
-    'validation-requirements': {
-      'requires-licensing-check': true,
-      'requires-appointment-check': true,
-      'requires-suitability-check': true,
-      'state-specific-rules': true,
-    },
-  },
-  {
-    pk: 'POLICY#POL-100004',
-    sk: 'TRANSACTION#d4e5f6a7-b8c9-0123-def0-456789012345',
-    'transaction-id': 'd4e5f6a7-b8c9-0123-def0-456789012345',
-    'policy-id': 'POL-100004',
-    'carrier-id': 'carrier',
-    'receiving-broker-id': 'BD-4004',
-    'delivering-broker-id': 'BD-3003',
-    'request-timestamp': '2026-02-18T10:00:00Z',
-    'current-status': 'TRANSFER_PROCESSING',
-    'status-history': [
-      { status: 'MANIFEST_REQUESTED', timestamp: '2026-02-18T10:00:00Z' },
-      { status: 'MANIFEST_RECEIVED', timestamp: '2026-02-18T11:00:00Z' },
-      { status: 'DUE_DILIGENCE_COMPLETE', timestamp: '2026-02-18T16:00:00Z' },
-      { status: 'CARRIER_VALIDATION_PENDING', timestamp: '2026-02-19T09:00:00Z' },
-      { status: 'CARRIER_APPROVED', timestamp: '2026-02-19T14:00:00Z', notes: 'All checks passed' },
-      { status: 'TRANSFER_INITIATED', timestamp: '2026-02-20T09:00:00Z' },
-      { status: 'TRANSFER_PROCESSING', timestamp: '2026-02-20T10:00:00Z' },
-    ],
-    'effective-date': '2026-02-28',
-    'policy-details': {
-      cusip: 'JKL012GHI',
-      'product-name': 'Athene Amplify Fixed Indexed Annuity',
-      'owner-ssn': '777-88-9999',
-      'owner-name': 'Emily Wilson',
-      'annuity-type': 'Indexed',
-      'account-type': '401k',
-      'issue-state': 'FL',
-      'custodial-indicator': 'Y',
-    },
-    'broker-details': {
-      'receiving-broker': {
-        'broker-id': 'BD-4004',
-        'broker-name': 'Raymond James',
-        'crd-number': '705',
-        npn: '99887766',
-      },
-      'delivering-broker': {
-        'broker-id': 'BD-3003',
-        'broker-name': 'Merrill Lynch',
-        'crd-number': '7691',
-      },
-    },
-    'validation-requirements': {
-      'requires-licensing-check': true,
-      'requires-appointment-check': true,
-      'requires-suitability-check': false,
-      'state-specific-rules': false,
-    },
-    'carrier-validation-details': {
-      'validation-result': 'approved',
-      'validation-checks': {
-        'licensing-check': 'passed',
-        'appointment-check': 'passed',
-        'suitability-check': 'passed',
-        'policy-rules-check': 'passed',
-      },
-      'validated-at': '2026-02-19T14:00:00Z',
-    },
-  },
-  {
-    pk: 'POLICY#POL-100005',
-    sk: 'TRANSACTION#e5f6a7b8-c9d0-1234-ef01-567890123456',
-    'transaction-id': 'e5f6a7b8-c9d0-1234-ef01-567890123456',
-    'policy-id': 'POL-100005',
-    'carrier-id': 'carrier',
-    'receiving-broker-id': 'BD-2002',
-    'delivering-broker-id': 'BD-4004',
-    'request-timestamp': '2026-02-23T07:00:00Z',
-    'current-status': 'MANIFEST_RECEIVED',
-    'status-history': [
-      { status: 'MANIFEST_REQUESTED', timestamp: '2026-02-23T07:00:00Z' },
-      { status: 'MANIFEST_RECEIVED', timestamp: '2026-02-23T08:30:00Z', notes: 'Awaiting due diligence' },
-    ],
-    'effective-date': '2026-04-01',
-    'policy-details': {
-      cusip: 'MNO345JKL',
-      'product-name': 'Prudential FlexGuard Indexed Variable Annuity',
-      'owner-ssn': '222-33-4444',
-      'owner-name': 'Michael Brown',
-      'annuity-type': 'Variable',
-      'account-type': 'IRA',
-      'issue-state': 'IL',
-      'custodial-indicator': 'N',
-    },
-    'broker-details': {
-      'receiving-broker': {
-        'broker-id': 'BD-2002',
-        'broker-name': 'Morgan Stanley Wealth Management',
-        'crd-number': '149777',
-        npn: '55667788',
-      },
-      'delivering-broker': {
-        'broker-id': 'BD-4004',
-        'broker-name': 'Raymond James',
-        'crd-number': '705',
-      },
-    },
-    'validation-requirements': {
-      'requires-licensing-check': true,
-      'requires-appointment-check': true,
-      'requires-suitability-check': true,
-      'state-specific-rules': false,
-    },
-  },
-]
+// API base URL - set via environment variable for production
+const API_BASE_URL = import.meta.env.VITE_CARRIER_API_URL || ''
 
-const carrier2MockData: BdChangeRequest[] = [
-  {
-    pk: 'POLICY#POL-200001',
-    sk: 'TRANSACTION#f1a2b3c4-d5e6-7890-abcd-1234567890ab',
-    'transaction-id': 'f1a2b3c4-d5e6-7890-abcd-1234567890ab',
-    'policy-id': 'POL-200001',
-    'carrier-id': 'carrier-2',
-    'receiving-broker-id': 'BD-5005',
-    'delivering-broker-id': 'BD-1001',
-    'request-timestamp': '2026-02-21T10:00:00Z',
-    'current-status': 'CARRIER_APPROVED',
-    'status-history': [
-      { status: 'MANIFEST_REQUESTED', timestamp: '2026-02-21T10:00:00Z' },
-      { status: 'MANIFEST_RECEIVED', timestamp: '2026-02-21T11:00:00Z' },
-      { status: 'DUE_DILIGENCE_COMPLETE', timestamp: '2026-02-21T15:00:00Z' },
-      { status: 'CARRIER_VALIDATION_PENDING', timestamp: '2026-02-21T16:00:00Z' },
-      { status: 'CARRIER_APPROVED', timestamp: '2026-02-22T09:00:00Z', notes: 'All checks passed' },
-    ],
-    'effective-date': '2026-03-10',
-    'policy-details': {
-      cusip: 'PQR678STU',
-      'product-name': 'Allianz 222 Fixed Index Annuity',
-      'owner-ssn': '333-44-5555',
-      'owner-name': 'Sarah Davis',
-      'annuity-type': 'Indexed',
-      'account-type': 'IRA',
-      'issue-state': 'OH',
-      'custodial-indicator': 'N',
-    },
-    'broker-details': {
-      'receiving-broker': {
-        'broker-id': 'BD-5005',
-        'broker-name': 'LPL Financial',
-        'crd-number': '6413',
-        npn: '44556677',
-      },
-      'delivering-broker': {
-        'broker-id': 'BD-1001',
-        'broker-name': 'Edward Jones',
-        'crd-number': '250',
-      },
-    },
-    'validation-requirements': {
-      'requires-licensing-check': true,
-      'requires-appointment-check': true,
-      'requires-suitability-check': false,
-      'state-specific-rules': true,
-    },
-    'carrier-validation-details': {
-      'validation-result': 'approved',
-      'validation-checks': {
-        'licensing-check': 'passed',
-        'appointment-check': 'passed',
-        'suitability-check': 'passed',
-        'policy-rules-check': 'passed',
-      },
-      'validated-at': '2026-02-22T09:00:00Z',
-    },
-  },
-  {
-    pk: 'POLICY#POL-200002',
-    sk: 'TRANSACTION#g2b3c4d5-e6f7-8901-bcde-234567890abc',
-    'transaction-id': 'g2b3c4d5-e6f7-8901-bcde-234567890abc',
-    'policy-id': 'POL-200002',
-    'carrier-id': 'carrier-2',
-    'receiving-broker-id': 'BD-3003',
-    'delivering-broker-id': 'BD-5005',
-    'request-timestamp': '2026-02-20T14:00:00Z',
-    'current-status': 'COMPLETE',
-    'status-history': [
-      { status: 'MANIFEST_REQUESTED', timestamp: '2026-02-20T14:00:00Z' },
-      { status: 'MANIFEST_RECEIVED', timestamp: '2026-02-20T15:00:00Z' },
-      { status: 'DUE_DILIGENCE_COMPLETE', timestamp: '2026-02-20T18:00:00Z' },
-      { status: 'CARRIER_VALIDATION_PENDING', timestamp: '2026-02-21T09:00:00Z' },
-      { status: 'CARRIER_APPROVED', timestamp: '2026-02-21T14:00:00Z' },
-      { status: 'TRANSFER_INITIATED', timestamp: '2026-02-22T09:00:00Z' },
-      { status: 'TRANSFER_PROCESSING', timestamp: '2026-02-22T10:00:00Z' },
-      { status: 'TRANSFER_CONFIRMED', timestamp: '2026-02-22T15:00:00Z' },
-      { status: 'COMPLETE', timestamp: '2026-02-22T16:00:00Z', notes: 'Transfer completed' },
-    ],
-    'effective-date': '2026-03-05',
-    'policy-details': {
-      cusip: 'VWX901YZA',
-      'product-name': 'Pacific Life Pacific Odyssey Variable Annuity',
-      'owner-ssn': '666-77-8888',
-      'owner-name': 'David Martinez',
-      'annuity-type': 'Variable',
-      'account-type': 'Non-Qualified',
-      'issue-state': 'AZ',
-      'custodial-indicator': 'Y',
-    },
-    'broker-details': {
-      'receiving-broker': {
-        'broker-id': 'BD-3003',
-        'broker-name': 'Merrill Lynch',
-        'crd-number': '7691',
-        npn: '66778899',
-      },
-      'delivering-broker': {
-        'broker-id': 'BD-5005',
-        'broker-name': 'LPL Financial',
-        'crd-number': '6413',
-      },
-    },
-    'validation-requirements': {
-      'requires-licensing-check': true,
-      'requires-appointment-check': true,
-      'requires-suitability-check': true,
-      'state-specific-rules': false,
-    },
-    'carrier-validation-details': {
-      'validation-result': 'approved',
-      'validation-checks': {
-        'licensing-check': 'passed',
-        'appointment-check': 'passed',
-        'suitability-check': 'passed',
-        'policy-rules-check': 'passed',
-      },
-      'validated-at': '2026-02-21T14:00:00Z',
-    },
-  },
-  {
-    pk: 'POLICY#POL-200003',
-    sk: 'TRANSACTION#h3c4d5e6-f7a8-9012-cdef-345678901bcd',
-    'transaction-id': 'h3c4d5e6-f7a8-9012-cdef-345678901bcd',
-    'policy-id': 'POL-200003',
-    'carrier-id': 'carrier-2',
-    'receiving-broker-id': 'BD-2002',
-    'delivering-broker-id': 'BD-4004',
-    'request-timestamp': '2026-02-23T11:00:00Z',
-    'current-status': 'DUE_DILIGENCE_COMPLETE',
-    'status-history': [
-      { status: 'MANIFEST_REQUESTED', timestamp: '2026-02-23T11:00:00Z' },
-      { status: 'MANIFEST_RECEIVED', timestamp: '2026-02-23T12:00:00Z' },
-      { status: 'DUE_DILIGENCE_COMPLETE', timestamp: '2026-02-23T16:00:00Z' },
-    ],
-    'effective-date': '2026-03-25',
-    'policy-details': {
-      cusip: 'BCD234EFG',
-      'product-name': 'Brighthouse Shield Level Selector',
-      'owner-ssn': '111-22-3333',
-      'owner-name': 'Jennifer Lee',
-      'annuity-type': 'Indexed',
-      'account-type': 'Roth IRA',
-      'issue-state': 'WA',
-      'custodial-indicator': 'N',
-    },
-    'broker-details': {
-      'receiving-broker': {
-        'broker-id': 'BD-2002',
-        'broker-name': 'Morgan Stanley Wealth Management',
-        'crd-number': '149777',
-        npn: '22334455',
-      },
-      'delivering-broker': {
-        'broker-id': 'BD-4004',
-        'broker-name': 'Raymond James',
-        'crd-number': '705',
-      },
-    },
-    'validation-requirements': {
-      'requires-licensing-check': true,
-      'requires-appointment-check': true,
-      'requires-suitability-check': true,
-      'state-specific-rules': true,
-    },
-  },
-]
+// Helper function to get random array element with type safety
+function getRandomElement<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)] as T
+}
 
-// Simulate API delay
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+// Mock data matching the new Policy Inquiry spec schema
+const generateMockData = (carrierId: CarrierTable): BdChangeRequest[] => {
+  const carrierNames: Record<CarrierTable, string> = {
+    'carrier': 'Athene Annuity',
+    'carrier-2': 'Nationwide Insurance'
+  }
+
+  const products: Record<CarrierTable, string[]> = {
+    'carrier': [
+      'Athene Amplify Fixed Indexed Annuity',
+      'Athene Benefit 10 Fixed Annuity',
+      'Athene Agility Fixed Indexed Annuity',
+      'Athene MaxRate Plus Annuity',
+      'Athene Performance Elite Plus',
+    ],
+    'carrier-2': [
+      'Nationwide New Heights Fixed Indexed Annuity',
+      'Nationwide Destination Navigator 2.0',
+      'Nationwide Peak 10 Annuity',
+      'Nationwide Monument Advisor',
+      'Nationwide Defined Protection Annuity',
+    ]
+  }
+
+  const clients = [
+    { name: 'John Smith', ssn: '6789' },
+    { name: 'Mary Johnson', ssn: '4321' },
+    { name: 'Robert Williams', ssn: '5555' },
+    { name: 'Patricia Brown', ssn: '1234' },
+    { name: 'Michael Davis', ssn: '9876' },
+    { name: 'Jennifer Garcia', ssn: '2468' },
+    { name: 'David Martinez', ssn: '1357' },
+    { name: 'Linda Wilson', ssn: '8642' },
+  ] as const
+
+  const statuses = [
+    'MANIFEST_REQUESTED',
+    'MANIFEST_RECEIVED',
+    'DUE_DILIGENCE_COMPLETE',
+    'CARRIER_VALIDATION_PENDING',
+    'CARRIER_APPROVED',
+    'CARRIER_REJECTED',
+    'TRANSFER_INITIATED',
+    'TRANSFER_PROCESSING',
+    'TRANSFER_CONFIRMED',
+    'COMPLETE',
+  ] as const
+
+  const accountTypes = ['individual', 'joint', 'trust', 'custodial', 'entity'] as const
+  const planTypes = ['nonQualified', 'rothIra', 'traditionalIra', 'sep', 'simple'] as const
+  const ownershipTypes = ['single', 'joint', 'trust', 'corporate'] as const
+  const contractStatuses = ['active', 'surrendered', 'matured', 'lapsed', 'pending'] as const
+
+  const startPolicyNum = carrierId === 'carrier' ? 100001 : 200001
+  const records: BdChangeRequest[] = []
+
+  for (let i = 0; i < 10; i++) {
+    const policyNum = startPolicyNum + i
+    const clientIdx = i % clients.length
+    const client = clients[clientIdx]!
+    const statusIdx = Math.floor(Math.random() * statuses.length)
+    const status = statuses[statusIdx]!
+    const isRejected = status === 'CARRIER_REJECTED'
+    const contractStatus = isRejected ? getRandomElement([...contractStatuses]) : 'active'
+
+    const statusHistory: StatusHistoryItem[] = []
+    const baseTime = new Date()
+    baseTime.setDate(baseTime.getDate() - Math.floor(Math.random() * 30))
+
+    for (let j = 0; j <= statusIdx; j++) {
+      const historyTime = new Date(baseTime.getTime() + j * 3600000 * (1 + Math.random() * 3))
+      const historyStatus = statuses[j]!
+      statusHistory.push({
+        status: historyStatus,
+        timestamp: historyTime.toISOString(),
+        notes: j === statusIdx && status === 'CARRIER_REJECTED' ? 'Producer not appointed with carrier' : undefined
+      })
+    }
+
+    const record: BdChangeRequest = {
+      pk: `POLICY#POL-${policyNum}`,
+      sk: `TRANSACTION#${crypto.randomUUID()}`,
+      transactionId: crypto.randomUUID(),
+      policyNumber: `POL-${policyNum}`,
+      carrierId: carrierId,
+      carrierName: carrierNames[carrierId],
+      currentStatus: status,
+      statusHistory,
+      createdAt: baseTime.toISOString(),
+      updatedAt: new Date().toISOString(),
+      clientName: client.name,
+      ssnLast4: client.ssn,
+      accountType: getRandomElement([...accountTypes]),
+      planType: getRandomElement([...planTypes]),
+      ownership: getRandomElement([...ownershipTypes]),
+      productName: getRandomElement([...products[carrierId]]),
+      cusip: Math.random().toString(36).substring(2, 11).toUpperCase(),
+      trailingCommission: Math.random() > 0.5,
+      contractStatus: contractStatus,
+      withdrawalStructure: {
+        systematicInPlace: Math.random() > 0.75
+      },
+      errors: []
+    }
+
+    // Add validation details if past validation stage
+    const validationStatuses = ['CARRIER_APPROVED', 'CARRIER_REJECTED', 'TRANSFER_INITIATED', 'TRANSFER_PROCESSING', 'TRANSFER_CONFIRMED', 'COMPLETE']
+    if (validationStatuses.includes(status)) {
+      const lastHistoryItem = statusHistory[statusHistory.length - 1]
+      record.carrierValidationDetails = {
+        validationResult: isRejected ? 'rejected' : 'approved',
+        licensingCheck: isRejected && Math.random() > 0.5 ? 'failed' : 'passed',
+        appointmentCheck: isRejected && Math.random() > 0.5 ? 'failed' : 'passed',
+        suitabilityCheck: 'passed',
+        policyRulesCheck: isRejected && Math.random() > 0.5 ? 'failed' : 'passed',
+        validatedAt: lastHistoryItem?.timestamp,
+        rejectionReason: isRejected ? 'Producer is not appointed with carrier' : undefined
+      }
+    }
+
+    if (isRejected) {
+      record.errors.push({
+        errorCode: 'notAppointed',
+        message: 'Producer is not appointed with carrier'
+      })
+    } else if (contractStatus !== 'active') {
+      record.errors.push({
+        errorCode: 'policyInactive',
+        message: `Policy is ${contractStatus}`
+      })
+    }
+
+    records.push(record)
+  }
+
+  return records
+}
+
+// Cache for mock data
+let carrierCache: BdChangeRequest[] | null = null
+let carrier2Cache: BdChangeRequest[] | null = null
+
+async function fetchFromApi(table: CarrierTable): Promise<BdChangeRequest[]> {
+  const response = await fetch(`${API_BASE_URL}/carrier/${table}`)
+  if (!response.ok) {
+    throw new Error(`API request failed: ${response.status}`)
+  }
+  return response.json()
+}
 
 export async function fetchCarrierRequests(table: CarrierTable = 'carrier'): Promise<BdChangeRequest[]> {
-  await delay(500)
-  return table === 'carrier' ? carrierMockData : carrier2MockData
+  // If API URL is configured, use the real API
+  if (API_BASE_URL) {
+    try {
+      return await fetchFromApi(table)
+    } catch (error) {
+      console.warn('API fetch failed, falling back to mock data:', error)
+    }
+  }
+
+  // Use mock data (cached for consistency during session)
+  if (table === 'carrier') {
+    if (!carrierCache) {
+      carrierCache = generateMockData('carrier')
+    }
+    return carrierCache
+  } else {
+    if (!carrier2Cache) {
+      carrier2Cache = generateMockData('carrier-2')
+    }
+    return carrier2Cache
+  }
 }
 
 export async function fetchCarrierRequestById(
   transactionId: string,
   table: CarrierTable = 'carrier'
 ): Promise<BdChangeRequest | null> {
-  await delay(300)
-  const data = table === 'carrier' ? carrierMockData : carrier2MockData
-  return data.find(r => r['transaction-id'] === transactionId) || null
+  const data = await fetchCarrierRequests(table)
+  return data.find(r => r.transactionId === transactionId) || null
 }
