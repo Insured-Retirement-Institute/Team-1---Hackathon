@@ -168,7 +168,7 @@ def health_check():
     }), 200
 
 
-@BP.route('/policy-inquiry', methods=['POST'], strict_slashes=False)
+@BP.route('/policy-inquiries/create', methods=['POST'], strict_slashes=False)
 def policy_inquiry():
     """
     Process policy inquiry request.
@@ -276,7 +276,7 @@ def policy_inquiry():
         )
 
 
-@BP.route('/policy-inquiry-callback', methods=['POST'], strict_slashes=False)
+@BP.route('/policy-inquiries/reply', methods=['POST'], strict_slashes=False)
 def policy_inquiry_callback():
     """
     Policy inquiry callback - receive policy inquiry response.
@@ -343,7 +343,7 @@ def policy_inquiry_callback():
         )
 
 
-@BP.route('/bd-change', methods=['POST'], strict_slashes=False)
+@BP.route('/servicing-agent-changes/create', methods=['POST'], strict_slashes=False)
 def bd_change():
     """
     Brokerage dealer change request.
@@ -409,7 +409,7 @@ def bd_change():
         )
 
 
-@BP.route('/transfer-notification', methods=['POST'], strict_slashes=False)
+@BP.route('/transfer-notifications/create', methods=['POST'], strict_slashes=False)
 def transfer_notification():
     """
     Transfer notification - accept transfer-related notifications.
@@ -1173,7 +1173,7 @@ def generate_carrier_letter():
     )
 
 
-@BP.route('/bd-change-callback', methods=['POST'])
+@BP.route('/servicing-agent-changes/reply', methods=['POST'])
 def bd_change_callback():
     """
     BD change callback - receive carrier validation response.
@@ -1251,7 +1251,7 @@ def bd_change_callback():
         )
 
 
-@BP.route('/transfer-confirmation', methods=['POST'], strict_slashes=False)
+@BP.route('/transfer-notifications/reply', methods=['POST'], strict_slashes=False)
 def transfer_confirmation():
     """
     Transfer confirmation - accept transfer confirmation.
@@ -1338,8 +1338,8 @@ def transfer_confirmation():
         )
 
 
-@BP.route('/query-status/<transaction_id>', methods=['GET'], strict_slashes=False)
-def query_status(transaction_id):
+@BP.route('/status/<requestId>', methods=['GET'], strict_slashes=False)
+def query_status(requestId):
     """
     Query transaction status.
     Retrieve current status and history for a specific transaction from distributor tables.
@@ -1349,55 +1349,55 @@ def query_status(transaction_id):
     try:
         # Validate UUID format
         try:
-            uuid.UUID(transaction_id)
+            uuid.UUID(requestId)
         except ValueError:
             return create_error_response(
-                "INVALID_TRANSACTION_ID",
-                "Transaction ID must be a valid UUID",
+                "INVALID_REQUEST_ID",
+                "Request ID must be a valid UUID",
                 400
             )
 
-        logger.info(f"Querying status for transaction: {transaction_id}")
+        logger.info(f"Querying status for request: {requestId}")
 
         # Search for transaction in distributor tables
-        record, table_name = find_transaction_by_id(transaction_id)
+        record, table_name = find_transaction_by_id(requestId)
 
         if not record:
             return create_error_response(
                 "NOT_FOUND",
-                f"Transaction {transaction_id} not found",
+                f"Request {requestId} not found",
                 404
             )
 
         # Format response
         status_data = {
-            "transaction-id": record.get("transaction-id"),
-            "current-status": record.get("current-status"),
-            "created-at": record.get("created-at"),
-            "updated-at": record.get("updated-at"),
-            "broker-role": record.get("broker-role"),
-            "status-history": record.get("status-history", []),
-            "policy-id": record.get("policy-id"),
-            "carrier-id": record.get("carrier-id"),
-            "client-details": record.get("client-details"),
-            "firm-details": record.get("firm-details"),
-            "agent-details": record.get("agent-details"),
-            "receiving-broker": record.get("receiving-broker"),
-            "delivering-broker": record.get("delivering-broker"),
+            "requestId": record.get("transaction-id"),
+            "currentStatus": record.get("current-status"),
+            "createdAt": record.get("created-at"),
+            "updatedAt": record.get("updated-at"),
+            "brokerRole": record.get("broker-role"),
+            "statusHistory": record.get("status-history", []),
+            "policyId": record.get("policy-id"),
+            "carrierId": record.get("carrier-id"),
+            "clientDetails": record.get("client-details"),
+            "firmDetails": record.get("firm-details"),
+            "agentDetails": record.get("agent-details"),
+            "receivingBroker": record.get("receiving-broker"),
+            "deliveringBroker": record.get("delivering-broker"),
         }
 
         # Include validation result if present
         if "validation-result" in record:
-            status_data["validation-result"] = record["validation-result"]
+            status_data["validationResult"] = record["validation-result"]
 
         # Include latest notification if present
         if "latest-notification" in record:
-            status_data["latest-notification"] = record["latest-notification"]
+            status_data["latestNotification"] = record["latest-notification"]
 
         return jsonify(status_data), 200
 
     except Exception as e:
-        logger.error(f"Error querying transaction status: {str(e)}")
+        logger.error(f"Error querying request status: {str(e)}")
         return create_error_response(
             "INTERNAL_ERROR",
             "Internal server error occurred",

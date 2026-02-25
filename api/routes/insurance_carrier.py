@@ -297,10 +297,10 @@ def format_policy_for_response(policy: dict, client_ssn: str = None) -> dict:
         "ownership": policy.get("ownership", "single"),
         "productName": policy.get("productName"),
         "cusip": policy.get("cusip"),
-        "trailingCommission": policy.get("trailingCommission", False),
+        "hasTrailingCommission": policy.get("trailingCommission", False),
         "contractStatus": POLICY_STATUS_MAP.get(policy_status, "active"),
         "withdrawalStructure": {
-            "systematicInPlace": False
+            "hasSystematicWithdrawal": False
         },
         "errors": errors
     }
@@ -405,15 +405,15 @@ def _process_carrier_policy_inquiry(carrier_key: str):
 
         response_payload = {
             "requestingFirm": {
-                "firmName": requesting_firm.get('firmName'),
+                "name": requesting_firm.get('firmName'),
                 "firmId": requesting_firm.get('firmId'),
                 "servicingAgent": {
-                    "agentName": servicing_agent.get('agentName'),
+                    "producerName": servicing_agent.get('agentName'),
                     "npn": servicing_agent.get('npn')
                 }
             },
             "producerValidation": {
-                "agentName": servicing_agent.get('agentName'),
+                "producerName": servicing_agent.get('agentName'),
                 "npn": servicing_agent.get('npn'),
                 "errors": producer_errors
             },
@@ -476,7 +476,7 @@ def prudential_policy_inquiry():
     return _process_carrier_policy_inquiry("prudential")
 
 
-@BP.route('/policy-inquiry', methods=['POST'], strict_slashes=False)
+@BP.route('/policy-inquiries/create', methods=['POST'], strict_slashes=False)
 def policy_inquiry():
     """
     Process policy inquiry request (direct or via clearinghouse).
@@ -537,24 +537,24 @@ def policy_inquiry():
                     "ownership": None,
                     "productName": None,
                     "cusip": None,
-                    "trailingCommission": False,
+                    "hasTrailingCommission": False,
                     "contractStatus": None,
-                    "withdrawalStructure": {"systematicInPlace": False},
+                    "withdrawalStructure": {"hasSystematicWithdrawal": False},
                     "errors": [{"errorCode": "policyNotFound",
                                 "message": f"Policy {policy_number} not found in carrier records"}]
                 })
 
         response_payload = {
             "requestingFirm": {
-                "firmName": requesting_firm.get('firmName'),
+                "name": requesting_firm.get('firmName'),
                 "firmId": requesting_firm.get('firmId'),
                 "servicingAgent": {
-                    "agentName": servicing_agent.get('agentName'),
+                    "producerName": servicing_agent.get('agentName'),
                     "npn": servicing_agent.get('npn')
                 }
             },
             "producerValidation": {
-                "agentName": servicing_agent.get('agentName'),
+                "producerName": servicing_agent.get('agentName'),
                 "npn": servicing_agent.get('npn'),
                 "errors": producer_errors
             },
@@ -579,7 +579,7 @@ def policy_inquiry():
         return create_error_response("INTERNAL_ERROR", "Internal server error occurred", 500)
 
 
-@BP.route('/policy-inquiry-callback', methods=['POST'], strict_slashes=False)
+@BP.route('/policy-inquiries/reply', methods=['POST'], strict_slashes=False)
 def policy_inquiry_callback():
     """
     Policy inquiry callback - submit policy inquiry response.
@@ -616,8 +616,7 @@ def policy_inquiry_callback():
         return create_error_response("INTERNAL_ERROR", "Internal server error occurred", 500)
 
 
-@BP.route('/receive-bd-change-request', methods=['POST'])
-@BP.route('/bd-change', methods=['POST'])
+@BP.route('/servicing-agent-changes/create', methods=['POST'])
 def receive_bd_change_request():
     """
     Receive a BD change validation request and return a synchronous IGO/NIGO determination.
@@ -752,7 +751,7 @@ def receive_bd_change_request():
         return create_error_response("INTERNAL_ERROR", "Internal server error occurred", 500)
 
 
-@BP.route('/transfer-notification', methods=['POST'], strict_slashes=False)
+@BP.route('/transfer-notifications/create', methods=['POST'], strict_slashes=False)
 def transfer_notification():
     """
     Transfer notification - accept transfer-related notifications.
@@ -815,7 +814,7 @@ def transfer_notification():
         return create_error_response("INTERNAL_ERROR", "Internal server error occurred", 500)
 
 
-@BP.route('/bd-change-callback', methods=['POST'], strict_slashes=False)
+@BP.route('/servicing-agent-changes/reply', methods=['POST'], strict_slashes=False)
 def bd_change_callback():
     """
     BD change callback - submit carrier validation response.
@@ -880,7 +879,7 @@ def bd_change_callback():
         )
 
 
-@BP.route('/transfer-confirmation', methods=['POST'], strict_slashes=False)
+@BP.route('/transfer-notifications/reply', methods=['POST'], strict_slashes=False)
 def transfer_confirmation():
     """
     Transfer confirmation - accept transfer confirmation.
@@ -943,26 +942,27 @@ def transfer_confirmation():
         )
 
 
-@BP.route('/query-status/<transaction_id>', methods=['GET'], strict_slashes=False)
-def query_status(transaction_id):
+@BP.route('/status/<requestId>', methods=['GET'], strict_slashes=False)
+def query_status(requestId):
     """
-    Query transaction status by transaction ID.
+    Query transaction status by request ID.
     """
     try:
         try:
-            uuid.UUID(transaction_id)
+            uuid.UUID(requestId)
         except ValueError:
             return create_error_response(
-                "INVALID_TRANSACTION_ID",
-                "Transaction ID must be a valid UUID",
+                "INVALID_REQUEST_ID",
+                "Request ID must be a valid UUID",
                 400
             )
 
-        logger.info("Status query for transaction: %s", transaction_id)
+        logger.info("Status query for request: %s", requestId)
 
         # TODO: Retrieve from request-tracking DynamoDB table.
         # Returning mock data for hackathon demo.
         status_data = {
+            "requestId": requestId,
             "currentStatus": "CARRIER_APPROVED",
             "createdAt": "2026-02-25T10:30:00Z",
             "updatedAt": "2026-02-25T11:00:00Z",
@@ -989,5 +989,5 @@ def query_status(transaction_id):
         return jsonify(status_data), 200
 
     except Exception as e:
-        logger.error("Error querying transaction status: %s", str(e))
+        logger.error("Error querying request status: %s", str(e))
         return create_error_response("INTERNAL_ERROR", "Internal server error occurred", 500)
