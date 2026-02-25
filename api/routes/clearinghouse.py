@@ -20,6 +20,35 @@ BP = Blueprint('clearinghouse', __name__)
 
 # Table names
 REQUEST_TRACKING_TABLE = os.environ.get("REQUEST_TRACKING_TABLE", "request-tracking")
+IIEX_TABLE = os.environ.get("IIEX_TABLE", "iiex")
+
+# Carrier name mapping by policy prefix (for IIEX lookups)
+CARRIER_NAME_BY_PREFIX = {
+    "ATH": "Athene",
+    "PAC": "Pacific Life",
+    "PRU": "Prudential",
+}
+
+# Value mappings for IIEX responses
+ACCOUNT_TYPE_MAP = {
+    "Fixed Annuity": "individual",
+    "Variable Annuity": "joint",
+    "Indexed Annuity": "trust",
+}
+
+PLAN_TYPE_MAP = {
+    "IRA": "traditionalIra",
+    "Roth IRA": "rothIra",
+    "Non-Qualified": "nonQualified",
+    "SEP IRA": "sep",
+    "SIMPLE IRA": "simple",
+}
+
+POLICY_STATUS_MAP = {
+    "Active": "active",
+    "Surrendered": "surrendered",
+    "Death Claim Pending": "death claim pending",
+}
 
 # Status constants
 STATUSES = [
@@ -134,7 +163,88 @@ def get_carrier_info(policy_numbers: list) -> tuple:
         return "athene", "Athene"
     elif first_policy.startswith("PAC"):
         return "pacific-life", "Pacific Life"
+    elif first_policy.startswith("PRU"):
+        return "prudential", "Prudential"
     return None, None
+
+
+def create_capability_response(
+    transaction_id: str,
+    message: str,
+    capability_status: str,
+    capability_level: str = "none",
+    supported_alternatives: list = None,
+    retry_after: str = None
+) -> tuple:
+    """Create a CapabilityResponse for 422 NOT_CAPABLE responses."""
+    response = {
+        "code": "NOT_CAPABLE",
+        "message": message,
+        "transactionId": transaction_id,
+        "capabilityStatus": capability_status,
+        "capabilityLevel": capability_level,
+    }
+    if supported_alternatives:
+        response["supportedAlternatives"] = supported_alternatives
+    if retry_after:
+        response["retryAfter"] = retry_after
+    return jsonify(response), 422
+
+
+def lookup_policy_from_iiex(policy_number: str) -> dict:
+    """
+    Look up a policy from the IIEX table.
+    Returns the policy record or None if not found.
+    """
+    policy = get_item(
+        IIEX_TABLE,
+        f"POLICY#{policy_number}",
+        f"POLICY#{policy_number}"
+    )
+
+    if policy:
+        # Determine carrier name from prefix
+        prefix = policy_number.split("-")[0] if "-" in policy_number else None
+        policy["_carrierName"] = CARRIER_NAME_BY_PREFIX.get(prefix, "Unknown")
+    return policy
+
+
+def format_iiex_policy_for_response(policy: dict, client_ssn: str = None) -> dict:
+    """
+    Format an IIEX DB policy record to PolicyInquiryResponse DetailedPolicyInfo format.
+    """
+    errors = []
+
+    # Check SSN match if provided
+    if client_ssn and policy.get("ownerSSN") != client_ssn:
+        errors.append({
+            "errorCode": "ssnContractMismatch",
+            "message": "Client's SSN does not match the contract on file"
+        })
+
+    # Check policy status
+    policy_status = policy.get("policyStatus", "Active")
+    if policy_status != "Active":
+        errors.append({
+            "errorCode": "policyInactive",
+            "message": f"Policy is {policy_status.lower()}"
+        })
+
+    return {
+        "policyNumber": policy.get("policyNumber"),
+        "carrierName": policy.get("_carrierName", "Unknown"),
+        "accountType": ACCOUNT_TYPE_MAP.get(policy.get("accountType"), "individual"),
+        "planType": PLAN_TYPE_MAP.get(policy.get("planType"), "nonQualified"),
+        "ownership": policy.get("ownership", "single"),
+        "productName": policy.get("productName"),
+        "cusip": policy.get("cusip"),
+        "trailingCommission": policy.get("trailingCommission", False),
+        "contractStatus": POLICY_STATUS_MAP.get(policy_status, "active"),
+        "withdrawalStructure": {
+            "systematicInPlace": False
+        },
+        "errors": errors
+    }
 
 
 @BP.route('/health', methods=['GET'])
@@ -147,12 +257,124 @@ def health_check():
     }), 200
 
 
-@BP.route('/submit-policy-inquiry-request', methods=['POST'])
-def submit_policy_inquiry_request():
+@BP.route('/dtcc/policy-inquiry', methods=['POST'])
+def dtcc_policy_inquiry():
     """
-    Receive policy inquiry request from receiving broker
-    Routes request to appropriate delivering broker
+    DTCC/IIEX policy inquiry endpoint.
+    Looks up policies from the IIEX table which contains aggregated data
+    from multiple carriers (Athene, Pacific Life).
+
+    This is the clearinghouse's cached/aggregated view of policy data.
+    """
+    transaction_id, error = validate_transaction_id(request.headers)
+    if error:
+        return error
+
+    try:
+        data = request.get_json()
+        if not data:
+            return create_error_response(
+                "INVALID_PAYLOAD",
+                "Request body is required",
+                400
+            )
+
+        if 'requestingFirm' not in data or 'client' not in data:
+            return create_error_response(
+                "VALIDATION_ERROR",
+                "requestingFirm and client are required fields",
+                400
+            )
+
+        requesting_firm = data.get('requestingFirm', {})
+        client = data.get('client', {})
+        servicing_agent = requesting_firm.get('servicingAgent', {})
+
+        logger.info(f"[DTCC/IIEX] Policy inquiry - Transaction ID: {transaction_id}")
+        logger.info(f"[DTCC/IIEX] Client: {client.get('clientName')}")
+        logger.info(f"[DTCC/IIEX] Policy Numbers: {client.get('policyNumbers', [])}")
+
+        client_ssn = client.get('ssn')
+        policy_numbers = client.get('policyNumbers', [])
+
+        policies = []
+        client_name_from_db = None
+        ssn_last4 = client_ssn[-4:] if client_ssn and len(client_ssn) >= 4 else None
+
+        for policy_number in policy_numbers:
+            policy = lookup_policy_from_iiex(policy_number)
+            if policy:
+                if not client_name_from_db:
+                    client_name_from_db = policy.get('clientName')
+                    if not ssn_last4 and policy.get('ownerSSN'):
+                        ssn_last4 = policy.get('ownerSSN')[-4:]
+
+                formatted_policy = format_iiex_policy_for_response(policy, client_ssn)
+                policies.append(formatted_policy)
+            else:
+                # Policy not found in IIEX
+                policies.append({
+                    "policyNumber": policy_number,
+                    "carrierName": None,
+                    "errors": [{
+                        "errorCode": "policyNotFound",
+                        "message": f"Policy {policy_number} not found in IIEX records"
+                    }]
+                })
+
+        response_payload = {
+            "requestingFirm": {
+                "firmName": requesting_firm.get('firmName'),
+                "firmId": requesting_firm.get('firmId'),
+                "servicingAgent": {
+                    "agentName": servicing_agent.get('agentName'),
+                    "npn": servicing_agent.get('npn')
+                }
+            },
+            "producerValidation": {
+                "agentName": servicing_agent.get('agentName'),
+                "npn": servicing_agent.get('npn'),
+                "errors": []
+            },
+            "client": {
+                "clientName": client_name_from_db or client.get('clientName'),
+                "ssnLast4": ssn_last4,
+                "policies": policies
+            },
+            "enums": {
+                "accountType": ["individual", "joint", "trust", "custodial", "entity"],
+                "planType": ["nonQualified", "rothIra", "traditionalIra", "sep", "simple"]
+            }
+        }
+
+        logger.info(f"[DTCC/IIEX] Returning {len(policies)} policies for transaction {transaction_id}")
+
+        return create_response(
+            "IMMEDIATE",
+            "Policy inquiry processed successfully from IIEX cache",
+            transaction_id,
+            response_payload,
+            200,
+            processing_mode="cached"
+        )
+
+    except Exception as e:
+        logger.error(f"[DTCC/IIEX] Error processing policy inquiry: {str(e)}")
+        return create_error_response(
+            "INTERNAL_ERROR",
+            "Internal server error occurred",
+            500
+        )
+
+
+@BP.route('/policy-inquiry', methods=['POST'])
+def policy_inquiry():
+    """
+    Process policy inquiry request.
+    Routes request to appropriate delivering broker or responds immediately if cached.
     Creates a new tracking record with MANIFEST_REQUESTED status.
+
+    Unified API endpoint - replaces /submit-policy-inquiry-request
     """
     transaction_id, error = validate_transaction_id(request.headers)
     if error:
@@ -228,12 +450,14 @@ def submit_policy_inquiry_request():
         )
 
 
-@BP.route('/submit-policy-inquiry-response', methods=['POST'])
-def submit_policy_inquiry_response():
+@BP.route('/policy-inquiry-callback', methods=['POST'])
+def policy_inquiry_callback():
     """
-    Receive policy inquiry response from delivering broker
-    Routes response to requesting broker
+    Policy inquiry callback - receive policy inquiry response.
+    Routes response to requesting broker.
     Updates tracking record to MANIFEST_RECEIVED status.
+
+    Unified API endpoint - replaces /submit-policy-inquiry-response
     """
     transaction_id, error = validate_transaction_id(request.headers)
     if error:
@@ -316,12 +540,14 @@ def submit_policy_inquiry_response():
         )
 
 
-@BP.route('/receive-bd-change-request', methods=['POST'])
-def receive_bd_change_request():
+@BP.route('/bd-change', methods=['POST'])
+def bd_change():
     """
-    Receive BD change request from receiving broker
-    Routes to carrier for validation
+    Brokerage dealer change request.
+    Routes to carrier for validation.
     Updates tracking record to CARRIER_VALIDATION_PENDING status.
+
+    Unified API endpoint - replaces /receive-bd-change-request
     """
     transaction_id, error = validate_transaction_id(request.headers)
     if error:
@@ -403,12 +629,14 @@ def receive_bd_change_request():
         )
 
 
-@BP.route('/receive-carrier-response', methods=['POST'])
-def receive_carrier_response():
+@BP.route('/bd-change-callback', methods=['POST'])
+def bd_change_callback():
     """
-    Receive carrier validation response
-    Routes response to receiving broker
+    BD change callback - receive carrier validation response.
+    Routes response to receiving broker.
     Updates tracking record to CARRIER_APPROVED or CARRIER_REJECTED.
+
+    Unified API endpoint - replaces /receive-carrier-response
     """
     transaction_id, error = validate_transaction_id(request.headers)
     if error:
@@ -495,12 +723,14 @@ def receive_carrier_response():
         )
 
 
-@BP.route('/receive-transfer-confirmation', methods=['POST'])
-def receive_transfer_confirmation():
+@BP.route('/transfer-notification', methods=['POST'])
+def transfer_notification():
     """
-    Receive transfer confirmation from delivering broker
-    Broadcasts to relevant parties
-    Updates tracking record to TRANSFER_CONFIRMED or COMPLETE.
+    Transfer notification - accept transfer-related notifications.
+    Supports various notification types (approval, initiation, completion).
+    Updates tracking record based on notification type.
+
+    Unified API endpoint.
     """
     transaction_id, error = validate_transaction_id(request.headers)
     if error:
@@ -515,9 +745,8 @@ def receive_transfer_confirmation():
                 400
             )
 
-        # Validate required fields
-        required_fields = ['transaction-id', 'delivering-broker-id',
-                           'policy-id', 'confirmation-status']
+        # Validate required fields per TransferNotification schema
+        required_fields = ['notificationType', 'policyNumber']
         missing_fields = [field for field in required_fields if field not in data]
         if missing_fields:
             return create_error_response(
@@ -526,17 +755,100 @@ def receive_transfer_confirmation():
                 400
             )
 
-        confirmation_status = data.get('confirmation-status')
-        if confirmation_status not in ['confirmed', 'failed']:
+        notification_type = data.get('notificationType')
+        valid_types = ['transfer-approved', 'transfer-initiated', 'transfer-confirmed',
+                       'transfer-complete', 'service-agent-change-complete']
+        if notification_type not in valid_types:
             return create_error_response(
                 "VALIDATION_ERROR",
-                "confirmation-status must be either 'confirmed' or 'failed'",
+                f"Invalid notificationType. Must be one of: {', '.join(valid_types)}",
+                400
+            )
+
+        logger.info(f"Received transfer notification - Transaction ID: {transaction_id}")
+        logger.info(f"Notification Type: {notification_type}")
+        logger.info(f"Policy Number: {data.get('policyNumber')}")
+
+        # Map notification type to status
+        notification_to_status = {
+            "transfer-approved": "CARRIER_APPROVED",
+            "transfer-initiated": "TRANSFER_INITIATED",
+            "transfer-confirmed": "TRANSFER_CONFIRMED",
+            "transfer-complete": "COMPLETE",
+            "service-agent-change-complete": "COMPLETE",
+        }
+        new_status = notification_to_status.get(notification_type, "TRANSFER_PROCESSING")
+
+        # Get existing tracking record
+        record = get_tracking_record(transaction_id)
+
+        if record:
+            update_tracking_status(
+                transaction_id,
+                record["sk"],
+                new_status,
+                f"Transfer notification received: {notification_type}"
+            )
+            logger.info(f"Updated tracking record {transaction_id} to {new_status}")
+
+        return create_response(
+            "RECEIVED",
+            f"Transfer notification '{notification_type}' received successfully",
+            transaction_id
+        )
+
+    except Exception as e:
+        logger.error(f"Error processing transfer notification: {str(e)}")
+        return create_error_response(
+            "INTERNAL_ERROR",
+            "Internal server error occurred",
+            500
+        )
+
+
+@BP.route('/transfer-confirmation', methods=['POST'])
+def transfer_confirmation():
+    """
+    Transfer confirmation - accept transfer confirmation from delivering entity.
+    Broadcasts to relevant parties.
+    Updates tracking record to TRANSFER_CONFIRMED or COMPLETE.
+
+    Unified API endpoint - replaces /receive-transfer-confirmation
+    """
+    transaction_id, error = validate_transaction_id(request.headers)
+    if error:
+        return error
+
+    try:
+        data = request.get_json()
+        if not data:
+            return create_error_response(
+                "INVALID_PAYLOAD",
+                "Request body is required",
+                400
+            )
+
+        # Validate required fields per TransferConfirmation schema
+        required_fields = ['policyNumber', 'confirmationStatus']
+        missing_fields = [field for field in required_fields if field not in data]
+        if missing_fields:
+            return create_error_response(
+                "VALIDATION_ERROR",
+                f"Missing required fields: {', '.join(missing_fields)}",
+                400
+            )
+
+        confirmation_status = data.get('confirmationStatus')
+        if confirmation_status not in ['confirmed', 'failed', 'pending']:
+            return create_error_response(
+                "VALIDATION_ERROR",
+                "confirmationStatus must be one of: 'confirmed', 'failed', 'pending'",
                 400
             )
 
         logger.info(f"Received transfer confirmation - Transaction ID: {transaction_id}")
-        logger.info(f"Delivering Broker: {data.get('delivering-broker-id')}")
-        logger.info(f"Policy ID: {data.get('policy-id')}")
+        logger.info(f"Delivering Broker: {data.get('deliveringBrokerId')}")
+        logger.info(f"Policy Number: {data.get('policyNumber')}")
         logger.info(f"Confirmation Status: {confirmation_status}")
 
         # Get existing tracking record

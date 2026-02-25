@@ -4,6 +4,7 @@ import { AccountType, ContractStatus, OwnershipType, PlanType, type ContractReco
 import { useLoaderStore } from '@/stores/useLoaderStore'
 import { brokerDealerApi, insuranceCarrierApi } from '@/api/Api'
 import { isClientResponse, type DetailedPolicyInfo, type PolicyInquiryRequest } from '@/models/ClearinghouseApi'
+import { useEventSource } from '@/utils/useEventSource'
 
 const CARRIER_PRODUCTS: Record<string, string> = {
 	'Allianz Life': 'Allianz 222® Annuity',
@@ -240,7 +241,8 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 			.filter(c => c.contractNumber.trim() !== '')
 			.map(c => c.contractNumber)
 
-		await new Promise(resolve => setTimeout(resolve, 2000))
+		// await new Promise(resolve => setTimeout(resolve, 2000))
+		await useEventSource().waitForEvent(() => true)
 
 		try {
 			// Try API call
