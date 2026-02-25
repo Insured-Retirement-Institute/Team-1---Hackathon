@@ -153,12 +153,14 @@ def health_check():
     }), 200
 
 
-@BP.route('/submit-policy-inquiry-request', methods=['POST'])
-def submit_policy_inquiry_request():
+@BP.route('/policy-inquiry', methods=['POST'])
+def policy_inquiry():
     """
-    Receive policy inquiry request from clearinghouse
-    Endpoint for delivering broker-dealer only
+    Process policy inquiry request.
+    Endpoint for delivering broker-dealer - receives from clearinghouse or direct.
     Stores the request in the distributor table.
+
+    Unified API endpoint - replaces /submit-policy-inquiry-request
     """
     transaction_id, error = validate_transaction_id(request.headers)
     if error:
@@ -198,7 +200,14 @@ def submit_policy_inquiry_request():
         policy_id = policy_numbers[0] if policy_numbers else "UNKNOWN"
 
         # Determine carrier from policy prefix
-        carrier_id = "carrier" if policy_id.startswith("ATH") else "carrier-2"
+        if policy_id.startswith("ATH"):
+            carrier_id = "carrier"
+        elif policy_id.startswith("PAC"):
+            carrier_id = "carrier-2"
+        elif policy_id.startswith("PRU"):
+            carrier_id = "carrier-3"
+        else:
+            carrier_id = "unknown"
 
         record = create_transaction_record(
             transaction_id=transaction_id,
@@ -252,12 +261,14 @@ def submit_policy_inquiry_request():
         )
 
 
-@BP.route('/receive-policy-inquiry-response', methods=['POST'])
-def receive_policy_inquiry_response():
+@BP.route('/policy-inquiry-callback', methods=['POST'])
+def policy_inquiry_callback():
     """
-    Receive policy inquiry response from clearinghouse
-    Endpoint for receiving broker-dealer only
+    Policy inquiry callback - receive policy inquiry response.
+    Endpoint for receiving broker-dealer - receives from clearinghouse or direct.
     Updates the transaction status to MANIFEST_RECEIVED.
+
+    Unified API endpoint - replaces /receive-policy-inquiry-response
     """
     transaction_id, error = validate_transaction_id(request.headers)
     if error:
@@ -315,12 +326,14 @@ def receive_policy_inquiry_response():
         )
 
 
-@BP.route('/receive-bd-change-request', methods=['POST'])
-def receive_bd_change_request():
+@BP.route('/bd-change', methods=['POST'])
+def bd_change():
     """
-    Receive BD change request from clearinghouse
-    Endpoint for receiving broker-dealer only
+    Brokerage dealer change request.
+    Endpoint for receiving broker-dealer - receives from clearinghouse or direct.
     Updates transaction status.
+
+    Unified API endpoint - replaces /receive-bd-change-request
     """
     transaction_id, error = validate_transaction_id(request.headers)
     if error:
@@ -379,11 +392,14 @@ def receive_bd_change_request():
         )
 
 
-@BP.route('/receive-transfer-notification', methods=['POST'])
-def receive_transfer_notification():
+@BP.route('/transfer-notification', methods=['POST'])
+def transfer_notification():
     """
-    Receive transfer notification from clearinghouse
+    Transfer notification - accept transfer-related notifications.
+    Receives from clearinghouse or direct.
     Accepts transfer-related notifications and updates status.
+
+    Unified API endpoint - replaces /receive-transfer-notification
     """
     transaction_id, error = validate_transaction_id(request.headers)
     if error:
@@ -398,8 +414,8 @@ def receive_transfer_notification():
                 400
             )
 
-        # Validate required fields
-        required_fields = ['transaction-id', 'notification-type', 'policy-id']
+        # Validate required fields per TransferNotification schema
+        required_fields = ['notificationType', 'policyNumber']
         missing_fields = [field for field in required_fields if field not in data]
         if missing_fields:
             return create_error_response(
@@ -408,19 +424,19 @@ def receive_transfer_notification():
                 400
             )
 
-        notification_type = data.get('notification-type')
+        notification_type = data.get('notificationType')
         valid_types = ['transfer-approved', 'transfer-initiated',
-                       'transfer-confirmed', 'transfer-complete']
+                       'transfer-confirmed', 'transfer-complete', 'service-agent-change-complete']
         if notification_type not in valid_types:
             return create_error_response(
                 "VALIDATION_ERROR",
-                f"Invalid notification-type. Must be one of: {', '.join(valid_types)}",
+                f"Invalid notificationType. Must be one of: {', '.join(valid_types)}",
                 400
             )
 
         logger.info(f"Received transfer notification - Transaction ID: {transaction_id}")
         logger.info(f"Notification Type: {notification_type}")
-        logger.info(f"Policy ID: {data.get('policy-id')}")
+        logger.info(f"Policy Number: {data.get('policyNumber')}")
 
         # Map notification type to status
         notification_to_status = {
@@ -451,9 +467,9 @@ def receive_transfer_notification():
                 record["sk"],
                 updates={
                     "latest-notification": {
-                        "notification-type": notification_type,
-                        "notification-timestamp": get_timestamp(),
-                        "policy-id": data.get('policy-id'),
+                        "notificationType": notification_type,
+                        "notificationTimestamp": get_timestamp(),
+                        "policyNumber": data.get('policyNumber'),
                     }
                 }
             )
@@ -474,11 +490,178 @@ def receive_transfer_notification():
         )
 
 
+@BP.route('/bd-change-callback', methods=['POST'])
+def bd_change_callback():
+    """
+    BD change callback - receive carrier validation response.
+    Updates transaction status based on approval/rejection.
+
+    Unified API endpoint.
+    """
+    transaction_id, error = validate_transaction_id(request.headers)
+    if error:
+        return error
+
+    try:
+        data = request.get_json()
+        if not data:
+            return create_error_response(
+                "INVALID_PAYLOAD",
+                "Request body is required",
+                400
+            )
+
+        # Validate required fields per CarrierResponse schema
+        required_fields = ['carrierId', 'policyNumber', 'validationResult']
+        missing_fields = [field for field in required_fields if field not in data]
+        if missing_fields:
+            return create_error_response(
+                "VALIDATION_ERROR",
+                f"Missing required fields: {', '.join(missing_fields)}",
+                400
+            )
+
+        validation_result = data.get('validationResult')
+        if validation_result not in ['approved', 'rejected']:
+            return create_error_response(
+                "VALIDATION_ERROR",
+                "validationResult must be either 'approved' or 'rejected'",
+                400
+            )
+
+        logger.info(f"Received carrier response - Transaction ID: {transaction_id}")
+        logger.info(f"Carrier: {data.get('carrierId')}")
+        logger.info(f"Policy Number: {data.get('policyNumber')}")
+        logger.info(f"Validation Result: {validation_result}")
+
+        # Find and update existing transaction
+        record, table_name = find_transaction_by_id(transaction_id)
+
+        if record:
+            new_status = "CARRIER_APPROVED" if validation_result == "approved" else "CARRIER_REJECTED"
+            notes = f"Carrier {validation_result} the BD change request"
+            if validation_result == 'rejected':
+                rejection_reason = data.get('rejectionReason', 'Not provided')
+                notes += f": {rejection_reason}"
+
+            update_transaction_status(
+                table_name,
+                record["pk"],
+                record["sk"],
+                new_status,
+                notes
+            )
+            logger.info(f"Updated transaction {transaction_id} to {new_status}")
+
+        return create_response(
+            "RECEIVED",
+            f"Carrier validation response received - {validation_result}",
+            transaction_id
+        )
+
+    except Exception as e:
+        logger.error(f"Error processing carrier response: {str(e)}")
+        return create_error_response(
+            "INTERNAL_ERROR",
+            "Internal server error occurred",
+            500
+        )
+
+
+@BP.route('/transfer-confirmation', methods=['POST'])
+def transfer_confirmation():
+    """
+    Transfer confirmation - accept transfer confirmation.
+    Updates transaction status to TRANSFER_CONFIRMED or COMPLETE.
+
+    Unified API endpoint.
+    """
+    transaction_id, error = validate_transaction_id(request.headers)
+    if error:
+        return error
+
+    try:
+        data = request.get_json()
+        if not data:
+            return create_error_response(
+                "INVALID_PAYLOAD",
+                "Request body is required",
+                400
+            )
+
+        # Validate required fields per TransferConfirmation schema
+        required_fields = ['policyNumber', 'confirmationStatus']
+        missing_fields = [field for field in required_fields if field not in data]
+        if missing_fields:
+            return create_error_response(
+                "VALIDATION_ERROR",
+                f"Missing required fields: {', '.join(missing_fields)}",
+                400
+            )
+
+        confirmation_status = data.get('confirmationStatus')
+        if confirmation_status not in ['confirmed', 'failed', 'pending']:
+            return create_error_response(
+                "VALIDATION_ERROR",
+                "confirmationStatus must be one of: 'confirmed', 'failed', 'pending'",
+                400
+            )
+
+        logger.info(f"Received transfer confirmation - Transaction ID: {transaction_id}")
+        logger.info(f"Policy Number: {data.get('policyNumber')}")
+        logger.info(f"Confirmation Status: {confirmation_status}")
+
+        # Find and update existing transaction
+        record, table_name = find_transaction_by_id(transaction_id)
+
+        if record:
+            if confirmation_status == "confirmed":
+                update_transaction_status(
+                    table_name,
+                    record["pk"],
+                    record["sk"],
+                    "TRANSFER_CONFIRMED",
+                    "Transfer confirmed"
+                )
+                update_transaction_status(
+                    table_name,
+                    record["pk"],
+                    record["sk"],
+                    "COMPLETE",
+                    "BD change process completed successfully"
+                )
+                logger.info(f"Updated transaction {transaction_id} to COMPLETE")
+            elif confirmation_status == "failed":
+                update_transaction_status(
+                    table_name,
+                    record["pk"],
+                    record["sk"],
+                    "TRANSFER_PROCESSING",
+                    f"Transfer confirmation failed"
+                )
+
+        return create_response(
+            "RECEIVED",
+            f"Transfer confirmation received - {confirmation_status}",
+            transaction_id
+        )
+
+    except Exception as e:
+        logger.error(f"Error processing transfer confirmation: {str(e)}")
+        return create_error_response(
+            "INTERNAL_ERROR",
+            "Internal server error occurred",
+            500
+        )
+
+
 @BP.route('/query-status/<transaction_id>', methods=['GET'])
 def query_status(transaction_id):
     """
-    Query transaction status
+    Query transaction status.
     Retrieve current status and history for a specific transaction from distributor tables.
+
+    Unified API endpoint.
     """
     try:
         # Validate UUID format

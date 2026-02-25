@@ -141,13 +141,15 @@ def health_check():
     }), 200
 
 
-@BP.route('/submit-policy-inquiry-request', methods=['POST'])
-def submit_policy_inquiry_request():
+@BP.route('/policy-inquiry', methods=['POST'])
+def policy_inquiry():
     """
-    Receive policy inquiry request (direct or via clearinghouse)
+    Process policy inquiry request (direct or via clearinghouse).
 
     Accept policy inquiry request to provide policy information for specified accounts.
     Carrier responds immediately with policy data from carrier tables.
+
+    Unified API endpoint - replaces /submit-policy-inquiry-request
     """
     transaction_id, error = validate_transaction_id(request.headers)
     if error:
@@ -280,13 +282,15 @@ def submit_policy_inquiry_request():
         )
 
 
-@BP.route('/submit-policy-inquiry-response', methods=['POST'])
-def submit_policy_inquiry_response():
+@BP.route('/policy-inquiry-callback', methods=['POST'])
+def policy_inquiry_callback():
     """
-    Submit policy inquiry response to clearinghouse
+    Policy inquiry callback - submit policy inquiry response.
 
     Submit detailed policy information response to clearinghouse after
     processing a deferred request.
+
+    Unified API endpoint - replaces /submit-policy-inquiry-response
     """
     transaction_id, error = validate_transaction_id(request.headers)
     if error:
@@ -338,17 +342,19 @@ def submit_policy_inquiry_response():
         )
 
 
-@BP.route('/receive-bd-change-request', methods=['POST'])
-def receive_bd_change_request():
+@BP.route('/bd-change', methods=['POST'])
+def bd_change():
     """
-    Receive BD change validation request from clearinghouse
-    Validates and approves/rejects broker-dealer changes
+    Brokerage dealer change request.
+    Validates and approves/rejects broker-dealer changes.
 
     The carrier performs validation checks including:
     - Agent licensing verification
     - Carrier appointment verification
     - Suitability requirements
     - Policy-specific rules
+
+    Unified API endpoint - replaces /receive-bd-change-request
     """
     transaction_id, error = validate_transaction_id(request.headers)
     if error:
@@ -423,11 +429,13 @@ def receive_bd_change_request():
         )
 
 
-@BP.route('/receive-transfer-notification', methods=['POST'])
-def receive_transfer_notification():
+@BP.route('/transfer-notification', methods=['POST'])
+def transfer_notification():
     """
-    Receive transfer notification from clearinghouse
-    Accept final service agent change notification
+    Transfer notification - accept transfer-related notifications.
+    Supports various notification types per TransferNotification schema.
+
+    Unified API endpoint - replaces /receive-transfer-notification
     """
     transaction_id, error = validate_transaction_id(request.headers)
     if error:
@@ -442,8 +450,8 @@ def receive_transfer_notification():
                 400
             )
 
-        # Validate required fields
-        required_fields = ['notificationType', 'policyNumber', 'carrierId']
+        # Validate required fields per TransferNotification schema
+        required_fields = ['notificationType', 'policyNumber']
         missing_fields = [field for field in required_fields if field not in data]
         if missing_fields:
             return create_error_response(
@@ -453,10 +461,12 @@ def receive_transfer_notification():
             )
 
         notification_type = data.get('notificationType')
-        if notification_type != 'service-agent-change-complete':
+        valid_types = ['transfer-approved', 'transfer-initiated', 'transfer-confirmed',
+                       'transfer-complete', 'service-agent-change-complete']
+        if notification_type not in valid_types:
             return create_error_response(
                 "VALIDATION_ERROR",
-                "notificationType must be 'service-agent-change-complete'",
+                f"notificationType must be one of: {', '.join(valid_types)}",
                 400
             )
 
@@ -477,7 +487,7 @@ def receive_transfer_notification():
 
         return create_response(
             "RECEIVED",
-            "Transfer notification received and processed",
+            f"Transfer notification '{notification_type}' received and processed",
             transaction_id,
             None,
             200,
@@ -486,6 +496,134 @@ def receive_transfer_notification():
 
     except Exception as e:
         logger.error(f"Error processing transfer notification: {str(e)}")
+        return create_error_response(
+            "INTERNAL_ERROR",
+            "Internal server error occurred",
+            500
+        )
+
+
+@BP.route('/bd-change-callback', methods=['POST'])
+def bd_change_callback():
+    """
+    BD change callback - submit carrier validation response.
+    Used to report approval/rejection to clearinghouse.
+
+    Unified API endpoint.
+    """
+    transaction_id, error = validate_transaction_id(request.headers)
+    if error:
+        return error
+
+    try:
+        data = request.get_json()
+        if not data:
+            return create_error_response(
+                "INVALID_PAYLOAD",
+                "Request body is required",
+                400
+            )
+
+        # Validate required fields per CarrierResponse schema
+        required_fields = ['carrierId', 'policyNumber', 'validationResult']
+        missing_fields = [field for field in required_fields if field not in data]
+        if missing_fields:
+            return create_error_response(
+                "VALIDATION_ERROR",
+                f"Missing required fields: {', '.join(missing_fields)}",
+                400
+            )
+
+        validation_result = data.get('validationResult')
+        if validation_result not in ['approved', 'rejected']:
+            return create_error_response(
+                "VALIDATION_ERROR",
+                "validationResult must be either 'approved' or 'rejected'",
+                400
+            )
+
+        logger.info(f"Submitting carrier response - Transaction ID: {transaction_id}")
+        logger.info(f"Carrier: {data.get('carrierId')}")
+        logger.info(f"Policy Number: {data.get('policyNumber')}")
+        logger.info(f"Validation Result: {validation_result}")
+
+        # TODO: Forward to clearinghouse
+        # - Send response to clearinghouse endpoint
+        # - Update local transaction status
+
+        return create_response(
+            "RECEIVED",
+            f"Carrier validation response submitted - {validation_result}",
+            transaction_id,
+            None,
+            200
+        )
+
+    except Exception as e:
+        logger.error(f"Error submitting carrier response: {str(e)}")
+        return create_error_response(
+            "INTERNAL_ERROR",
+            "Internal server error occurred",
+            500
+        )
+
+
+@BP.route('/transfer-confirmation', methods=['POST'])
+def transfer_confirmation():
+    """
+    Transfer confirmation - accept transfer confirmation.
+
+    Unified API endpoint.
+    """
+    transaction_id, error = validate_transaction_id(request.headers)
+    if error:
+        return error
+
+    try:
+        data = request.get_json()
+        if not data:
+            return create_error_response(
+                "INVALID_PAYLOAD",
+                "Request body is required",
+                400
+            )
+
+        # Validate required fields per TransferConfirmation schema
+        required_fields = ['policyNumber', 'confirmationStatus']
+        missing_fields = [field for field in required_fields if field not in data]
+        if missing_fields:
+            return create_error_response(
+                "VALIDATION_ERROR",
+                f"Missing required fields: {', '.join(missing_fields)}",
+                400
+            )
+
+        confirmation_status = data.get('confirmationStatus')
+        if confirmation_status not in ['confirmed', 'failed', 'pending']:
+            return create_error_response(
+                "VALIDATION_ERROR",
+                "confirmationStatus must be one of: 'confirmed', 'failed', 'pending'",
+                400
+            )
+
+        logger.info(f"Received transfer confirmation - Transaction ID: {transaction_id}")
+        logger.info(f"Policy Number: {data.get('policyNumber')}")
+        logger.info(f"Confirmation Status: {confirmation_status}")
+
+        # TODO: Process transfer confirmation
+        # - Update policy records
+        # - Finalize broker change
+
+        return create_response(
+            "RECEIVED",
+            f"Transfer confirmation received - {confirmation_status}",
+            transaction_id,
+            None,
+            200
+        )
+
+    except Exception as e:
+        logger.error(f"Error processing transfer confirmation: {str(e)}")
         return create_error_response(
             "INTERNAL_ERROR",
             "Internal server error occurred",

@@ -134,7 +134,32 @@ def get_carrier_info(policy_numbers: list) -> tuple:
         return "athene", "Athene"
     elif first_policy.startswith("PAC"):
         return "pacific-life", "Pacific Life"
+    elif first_policy.startswith("PRU"):
+        return "prudential", "Prudential"
     return None, None
+
+
+def create_capability_response(
+    transaction_id: str,
+    message: str,
+    capability_status: str,
+    capability_level: str = "none",
+    supported_alternatives: list = None,
+    retry_after: str = None
+) -> tuple:
+    """Create a CapabilityResponse for 422 NOT_CAPABLE responses."""
+    response = {
+        "code": "NOT_CAPABLE",
+        "message": message,
+        "transactionId": transaction_id,
+        "capabilityStatus": capability_status,
+        "capabilityLevel": capability_level,
+    }
+    if supported_alternatives:
+        response["supportedAlternatives"] = supported_alternatives
+    if retry_after:
+        response["retryAfter"] = retry_after
+    return jsonify(response), 422
 
 
 @BP.route('/health', methods=['GET'])
@@ -147,12 +172,14 @@ def health_check():
     }), 200
 
 
-@BP.route('/submit-policy-inquiry-request', methods=['POST'])
-def submit_policy_inquiry_request():
+@BP.route('/policy-inquiry', methods=['POST'])
+def policy_inquiry():
     """
-    Receive policy inquiry request from receiving broker
-    Routes request to appropriate delivering broker
+    Process policy inquiry request.
+    Routes request to appropriate delivering broker or responds immediately if cached.
     Creates a new tracking record with MANIFEST_REQUESTED status.
+
+    Unified API endpoint - replaces /submit-policy-inquiry-request
     """
     transaction_id, error = validate_transaction_id(request.headers)
     if error:
@@ -228,12 +255,14 @@ def submit_policy_inquiry_request():
         )
 
 
-@BP.route('/submit-policy-inquiry-response', methods=['POST'])
-def submit_policy_inquiry_response():
+@BP.route('/policy-inquiry-callback', methods=['POST'])
+def policy_inquiry_callback():
     """
-    Receive policy inquiry response from delivering broker
-    Routes response to requesting broker
+    Policy inquiry callback - receive policy inquiry response.
+    Routes response to requesting broker.
     Updates tracking record to MANIFEST_RECEIVED status.
+
+    Unified API endpoint - replaces /submit-policy-inquiry-response
     """
     transaction_id, error = validate_transaction_id(request.headers)
     if error:
@@ -316,12 +345,14 @@ def submit_policy_inquiry_response():
         )
 
 
-@BP.route('/receive-bd-change-request', methods=['POST'])
-def receive_bd_change_request():
+@BP.route('/bd-change', methods=['POST'])
+def bd_change():
     """
-    Receive BD change request from receiving broker
-    Routes to carrier for validation
+    Brokerage dealer change request.
+    Routes to carrier for validation.
     Updates tracking record to CARRIER_VALIDATION_PENDING status.
+
+    Unified API endpoint - replaces /receive-bd-change-request
     """
     transaction_id, error = validate_transaction_id(request.headers)
     if error:
@@ -403,12 +434,14 @@ def receive_bd_change_request():
         )
 
 
-@BP.route('/receive-carrier-response', methods=['POST'])
-def receive_carrier_response():
+@BP.route('/bd-change-callback', methods=['POST'])
+def bd_change_callback():
     """
-    Receive carrier validation response
-    Routes response to receiving broker
+    BD change callback - receive carrier validation response.
+    Routes response to receiving broker.
     Updates tracking record to CARRIER_APPROVED or CARRIER_REJECTED.
+
+    Unified API endpoint - replaces /receive-carrier-response
     """
     transaction_id, error = validate_transaction_id(request.headers)
     if error:
@@ -495,12 +528,14 @@ def receive_carrier_response():
         )
 
 
-@BP.route('/receive-transfer-confirmation', methods=['POST'])
-def receive_transfer_confirmation():
+@BP.route('/transfer-notification', methods=['POST'])
+def transfer_notification():
     """
-    Receive transfer confirmation from delivering broker
-    Broadcasts to relevant parties
-    Updates tracking record to TRANSFER_CONFIRMED or COMPLETE.
+    Transfer notification - accept transfer-related notifications.
+    Supports various notification types (approval, initiation, completion).
+    Updates tracking record based on notification type.
+
+    Unified API endpoint.
     """
     transaction_id, error = validate_transaction_id(request.headers)
     if error:
@@ -515,9 +550,8 @@ def receive_transfer_confirmation():
                 400
             )
 
-        # Validate required fields
-        required_fields = ['transaction-id', 'delivering-broker-id',
-                           'policy-id', 'confirmation-status']
+        # Validate required fields per TransferNotification schema
+        required_fields = ['notificationType', 'policyNumber']
         missing_fields = [field for field in required_fields if field not in data]
         if missing_fields:
             return create_error_response(
@@ -526,17 +560,100 @@ def receive_transfer_confirmation():
                 400
             )
 
-        confirmation_status = data.get('confirmation-status')
-        if confirmation_status not in ['confirmed', 'failed']:
+        notification_type = data.get('notificationType')
+        valid_types = ['transfer-approved', 'transfer-initiated', 'transfer-confirmed',
+                       'transfer-complete', 'service-agent-change-complete']
+        if notification_type not in valid_types:
             return create_error_response(
                 "VALIDATION_ERROR",
-                "confirmation-status must be either 'confirmed' or 'failed'",
+                f"Invalid notificationType. Must be one of: {', '.join(valid_types)}",
+                400
+            )
+
+        logger.info(f"Received transfer notification - Transaction ID: {transaction_id}")
+        logger.info(f"Notification Type: {notification_type}")
+        logger.info(f"Policy Number: {data.get('policyNumber')}")
+
+        # Map notification type to status
+        notification_to_status = {
+            "transfer-approved": "CARRIER_APPROVED",
+            "transfer-initiated": "TRANSFER_INITIATED",
+            "transfer-confirmed": "TRANSFER_CONFIRMED",
+            "transfer-complete": "COMPLETE",
+            "service-agent-change-complete": "COMPLETE",
+        }
+        new_status = notification_to_status.get(notification_type, "TRANSFER_PROCESSING")
+
+        # Get existing tracking record
+        record = get_tracking_record(transaction_id)
+
+        if record:
+            update_tracking_status(
+                transaction_id,
+                record["sk"],
+                new_status,
+                f"Transfer notification received: {notification_type}"
+            )
+            logger.info(f"Updated tracking record {transaction_id} to {new_status}")
+
+        return create_response(
+            "RECEIVED",
+            f"Transfer notification '{notification_type}' received successfully",
+            transaction_id
+        )
+
+    except Exception as e:
+        logger.error(f"Error processing transfer notification: {str(e)}")
+        return create_error_response(
+            "INTERNAL_ERROR",
+            "Internal server error occurred",
+            500
+        )
+
+
+@BP.route('/transfer-confirmation', methods=['POST'])
+def transfer_confirmation():
+    """
+    Transfer confirmation - accept transfer confirmation from delivering entity.
+    Broadcasts to relevant parties.
+    Updates tracking record to TRANSFER_CONFIRMED or COMPLETE.
+
+    Unified API endpoint - replaces /receive-transfer-confirmation
+    """
+    transaction_id, error = validate_transaction_id(request.headers)
+    if error:
+        return error
+
+    try:
+        data = request.get_json()
+        if not data:
+            return create_error_response(
+                "INVALID_PAYLOAD",
+                "Request body is required",
+                400
+            )
+
+        # Validate required fields per TransferConfirmation schema
+        required_fields = ['policyNumber', 'confirmationStatus']
+        missing_fields = [field for field in required_fields if field not in data]
+        if missing_fields:
+            return create_error_response(
+                "VALIDATION_ERROR",
+                f"Missing required fields: {', '.join(missing_fields)}",
+                400
+            )
+
+        confirmation_status = data.get('confirmationStatus')
+        if confirmation_status not in ['confirmed', 'failed', 'pending']:
+            return create_error_response(
+                "VALIDATION_ERROR",
+                "confirmationStatus must be one of: 'confirmed', 'failed', 'pending'",
                 400
             )
 
         logger.info(f"Received transfer confirmation - Transaction ID: {transaction_id}")
-        logger.info(f"Delivering Broker: {data.get('delivering-broker-id')}")
-        logger.info(f"Policy ID: {data.get('policy-id')}")
+        logger.info(f"Delivering Broker: {data.get('deliveringBrokerId')}")
+        logger.info(f"Policy Number: {data.get('policyNumber')}")
         logger.info(f"Confirmation Status: {confirmation_status}")
 
         # Get existing tracking record
