@@ -181,6 +181,119 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /generate-carrier-letter:
+    post:
+      summary: Generate an off-DTCC servicing agent change letter
+      description: |
+        Generate a formal servicing agent change letter addressed directly to the
+        insurance carrier. Used when a DTCC Policy Inquiry returns "no contracts found"
+        and the broker-dealer must contact the carrier off-platform.
+
+        The carrier directory is consulted to resolve the mailing address and surface
+        any carrier-specific submission requirements (proprietary form required,
+        notarization, medallion guarantee, processing time, etc.).
+
+        Returns the letter as plain text and as a Base64-encoded PDF.
+
+        **Response codes:**
+        - `GENERATED` — letter and PDF produced; `payload.letterText` and `payload.pdfBase64` populated
+        - `CARRIER_OWN_FORM` — carrier requires its proprietary form; letter not generated;
+          `payload` contains form name, notes, and portal URL
+        - `VALIDATION_ERROR` — required fields missing or carrier not found and no address supplied
+      operationId: generateCarrierLetter
+      parameters:
+        - name: transactionId
+          in: header
+          required: true
+          description: Unique transaction identifier for request correlation
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CarrierLetterRequest'
+            example:
+              requestId: "req-abc-123"
+              carrierName: "Pacific Life"
+              client:
+                name: "Joshua Lee"
+                ssnLast4: "8122"
+              policyNumbers: ["PAC-200011"]
+              currentAgent:
+                name: "Robert Hughes"
+                npn: "11223344"
+              newAgent:
+                name: "Amanda Foster"
+                npn: "27530463"
+                bdName: "Strategic Wealth Advisors"
+                bdDtccId: "SWA001"
+              reasonForChange: "Client requested transfer to new advisor following relocation"
+              trailingCommission: "no"
+              effectiveDateRequested: "2026-03-15"
+              requestingFirm:
+                name: "Strategic Wealth Advisors"
+                contact: "Amanda Foster"
+                phone: "800-555-0101"
+      responses:
+        '200':
+          description: |
+            Letter generated successfully (`GENERATED`) or carrier requires its own form
+            (`CARRIER_OWN_FORM`). Both cases return HTTP 200.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardResponse'
+              examples:
+                generated:
+                  summary: Letter generated successfully
+                  value:
+                    code: "GENERATED"
+                    message: "Carrier letter generated for Pacific Life Insurance Company"
+                    transactionId: "123e4567-e89b-12d3-a456-426614174000"
+                    processingMode: "immediate"
+                    payload:
+                      letterText: "Strategic Wealth Advisors\n=========================\n..."
+                      pdfBase64: "JVBERi0xLjQ..."
+                      metadata:
+                        carrier: "Pacific Life Insurance Company"
+                        client: "Joshua Lee"
+                        policyNumbers: ["PAC-200011"]
+                        newAgent: "Amanda Foster"
+                        generatedDate: "2026-02-25"
+                        carrierRequirements:
+                          wetSignatureRequired: true
+                          notarizationRequired: false
+                          medallionRequired: false
+                          notes: "Accepts firm letterhead. Include copy of new agent's carrier appointment confirmation."
+                          processingTimeDays: 5
+                carrier_own_form:
+                  summary: Carrier requires proprietary form
+                  value:
+                    code: "CARRIER_OWN_FORM"
+                    message: "Nationwide Life and Annuity Insurance Company requires the use of Nationwide Form NAT-3017 — Broker of Record Change."
+                    transactionId: "123e4567-e89b-12d3-a456-426614174000"
+                    processingMode: "immediate"
+                    payload:
+                      carrierName: "Nationwide Life and Annuity Insurance Company"
+                      ownFormName: "Nationwide Form NAT-3017 — Broker of Record Change"
+                      notes: "Must use Nationwide's proprietary Form NAT-3017. Letters on firm letterhead are not accepted."
+                      portalUrl: "https://nationwide.com/advisor-portal"
+        '400':
+          description: Missing fields or carrier address unresolvable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Letter or PDF generation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /extract-policy-from-pdf:
     post:
       summary: Extract policy data from a carrier statement PDF
@@ -327,6 +440,95 @@ paths:
 
 components:
   schemas:
+    CarrierLetterRequest:
+      type: object
+      required:
+        - requestId
+        - carrierName
+        - client
+        - policyNumbers
+        - currentAgent
+        - newAgent
+        - reasonForChange
+        - trailingCommission
+        - requestingFirm
+      additionalProperties: false
+      properties:
+        requestId:
+          type: string
+          description: Caller-supplied request identifier. Echoed in logs.
+        carrierName:
+          type: string
+          description: |
+            Carrier name or alias. Used to look up mailing address and submission
+            requirements from the carrier directory.
+            If not found, `carrierAddress` must be provided.
+        carrierDepartment:
+          type: string
+          description: |
+            Department to address the letter to (e.g. "Annuity Service Center").
+            Defaults to the directory value when the carrier is found.
+        carrierAddress:
+          type: object
+          description: |
+            Full mailing address. Optional when the carrier resolves in the directory.
+            Required otherwise.
+          required: [line1, city, state, zip]
+          additionalProperties: false
+          properties:
+            line1:  { type: string }
+            line2:  { type: string, default: "" }
+            city:   { type: string }
+            state:  { type: string, minLength: 2, maxLength: 2 }
+            zip:    { type: string }
+        client:
+          type: object
+          required: [name, ssnLast4]
+          additionalProperties: false
+          properties:
+            name:     { type: string, description: "Full legal name of the policy owner." }
+            ssnLast4: { type: string, minLength: 4, maxLength: 4, description: "Last 4 digits of SSN." }
+        policyNumbers:
+          type: array
+          items: { type: string }
+          minItems: 1
+          description: Policy/contract numbers to include in the letter.
+        currentAgent:
+          type: object
+          required: [name, npn]
+          additionalProperties: false
+          properties:
+            name: { type: string, description: "Full name of the agent being replaced." }
+            npn:  { type: string, description: "NPN of the agent being replaced." }
+        newAgent:
+          type: object
+          required: [name, npn, bdName, bdDtccId]
+          additionalProperties: false
+          properties:
+            name:     { type: string, description: "Full name of the incoming servicing agent." }
+            npn:      { type: string, description: "NPN of the incoming agent." }
+            bdName:   { type: string, description: "Name of the receiving broker-dealer." }
+            bdDtccId: { type: string, description: "DTCC firm ID of the receiving broker-dealer." }
+        reasonForChange:
+          type: string
+          description: Plain-language explanation for the change.
+        trailingCommission:
+          type: string
+          enum: [yes, no, unknown]
+          description: Whether trailing commissions apply to the new servicing agent.
+        effectiveDateRequested:
+          type: string
+          pattern: '^\d{4}-\d{2}-\d{2}$'
+          description: Requested effective date (YYYY-MM-DD). Omit for "as soon as possible".
+        requestingFirm:
+          type: object
+          required: [name, contact, phone]
+          additionalProperties: false
+          properties:
+            name:    { type: string, description: "BD firm submitting this letter." }
+            contact: { type: string, description: "Authorized representative name." }
+            phone:   { type: string, description: "Contact phone number." }
+
     PdfExtractionRequest:
       type: object
       required:

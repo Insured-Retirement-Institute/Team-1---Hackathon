@@ -1,0 +1,129 @@
+{
+  "carriers": [
+    {
+      "carrier_id": "CAR-001",
+      "carrier_name": "Pacific Life Insurance Company",
+      "aliases": ["Pacific Life", "Pacific"],
+      "naic_code": "67466",
+      "servicing_department": "Annuity Service Center",
+      "correspondence": {
+        "address": {
+          "line1": "700 Newport Center Drive",
+          "city": "Newport Beach",
+          "state": "CA",
+          "zip": "92660"
+        },
+        "fax": "800-747-6898",
+        "email": "annuityservice@pacificlife.com"
+      },
+      "requirements": {
+        "use_own_form": false,
+        "wet_signature_required": true,
+        "notarization_required": false,
+        "medallion_required": false,
+        "notes": "Accepts firm letterhead. Include copy of new agent's carrier appointment confirmation."
+      },
+      "processing_time_days": 5
+    },
+    {
+      "carrier_id": "CAR-002",
+      "carrier_name": "Nationwide Life and Annuity Insurance Company",
+      "aliases": ["Nationwide", "Nationwide Life"],
+      "naic_code": "92657",
+      "servicing_department": "Annuity Operations",
+      "correspondence": {
+        "address": {
+          "line1": "One Nationwide Plaza",
+          "city": "Columbus",
+          "state": "OH",
+          "zip": "43215"
+        },
+        "fax": "614-249-7965",
+        "portal_url": "https://nationwide.com/advisor-portal"
+      },
+      "requirements": {
+        "use_own_form": true,
+        "own_form_name": "Nationwide Form NAT-3017 — Broker of Record Change",
+        "wet_signature_required": true,
+        "notarization_required": false,
+        "medallion_required": false,
+        "notes": "Must use Nationwide's proprietary Form NAT-3017. Letters on firm letterhead are not accepted. Form available through advisor portal."
+      },
+      "processing_time_days": 7
+    },
+    {
+      "carrier_id": "CAR-003",
+      "carrier_name": "Lincoln Benefit Life Company",
+      "aliases": ["Lincoln Benefit", "LBL"],
+      "naic_code": "65595",
+      "servicing_department": "Policy Owner Services",
+      "correspondence": {
+        "address": {
+          "line1": "P.O. Box 80469",
+          "city": "Lincoln",
+          "state": "NE",
+          "zip": "68501"
+        },
+        "fax": "402-435-5122",
+        "email": "policyservices@lincolnbenefitlife.com"
+      },
+      "requirements": {
+        "use_own_form": false,
+        "wet_signature_required": true,
+        "notarization_required": false,
+        "medallion_required": false,
+        "notes": "Accepts firm letterhead. Both client and new BD must sign. Include new producer's state license certificate for the policy state."
+      },
+      "processing_time_days": 10
+    },
+    {
+      "carrier_id": "CAR-004",
+      "carrier_name": "Integrity Life Insurance Company",
+      "aliases": ["Integrity Life", "Integrity"],
+      "naic_code": "82627",
+      "servicing_department": "Contract Services",
+      "correspondence": {
+        "address": {
+          "line1": "400 Broadway",
+          "city": "Cincinnati",
+          "state": "OH",
+          "zip": "45202"
+        },
+        "fax": "513-362-4010"
+      },
+      "requirements": {
+        "use_own_form": false,
+        "wet_signature_required": true,
+        "notarization_required": false,
+        "medallion_required": false,
+        "notes": "Letter must explicitly state whether trailing commissions apply. Include DTCC rejection notice if available."
+      },
+      "processing_time_days": 8
+    },
+    {
+      "carrier_id": "CAR-005",
+      "carrier_name": "American Equity Investment Life Insurance Company",
+      "aliases": ["American Equity", "AE", "AEIL"],
+      "naic_code": "92738",
+      "servicing_department": "Agent & Agency Services",
+      "correspondence": {
+        "address": {
+          "line1": "6000 Westown Parkway",
+          "city": "West Des Moines",
+          "state": "IA",
+          "zip": "50266"
+        },
+        "fax": "515-221-0228",
+        "email": "agentservices@americanequity.com"
+      },
+      "requirements": {
+        "use_own_form": false,
+        "wet_signature_required": true,
+        "notarization_required": false,
+        "medallion_required": false,
+        "notes": "Client signature must be notarized for contracts over $500,000 in contract value. Standard letter accepted for all others."
+      },
+      "processing_time_days": 5
+    }
+  ]
+}

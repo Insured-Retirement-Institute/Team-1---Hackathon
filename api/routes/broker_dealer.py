@@ -5,11 +5,17 @@ Integrated with DynamoDB distributor tables.
 """
 
 from flask import request, jsonify, Blueprint
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 import sys
 import uuid
+import base64
+import json
+import io
+import os
 import logging
 from dotenv import load_dotenv
+import boto3
+from fpdf import FPDF
 load_dotenv(override=False)
 sys.path.insert(0, "../")
 sys.path.insert(0, "../../")
@@ -740,6 +746,409 @@ def extract_policy_from_pdf():
         "Policy data extracted from document",
         transaction_id,
         result,
+        200,
+        processing_mode="immediate",
+    )
+
+
+# ── Carrier Letter Generator ────────────────────────────────────────────────────
+# Off-DTCC scenario: DTCC returned "no contracts found", so the BD must send a
+# formal servicing-agent change letter directly to the carrier.
+# Uses the carrier directory bundled in api/data/carrier_directory.json.
+
+_CARRIER_DIR_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "carrier_directory.json")
+
+def _load_carrier_directory() -> list[dict]:
+    """Load and return the list of carriers from the bundled directory JSON."""
+    try:
+        with open(_CARRIER_DIR_PATH) as f:
+            return json.load(f)["carriers"]
+    except Exception:
+        return []
+
+
+def _lookup_carrier(carrier_name: str, carriers: list[dict]) -> dict | None:
+    """Return the carrier record for an exact or alias match, or None."""
+    name_lower = carrier_name.lower().strip()
+    for c in carriers:
+        if c["carrier_name"].lower() == name_lower:
+            return c
+        if any(alias.lower() == name_lower for alias in c.get("aliases", [])):
+            return c
+    # Partial match fallback
+    for c in carriers:
+        candidates = [c["carrier_name"]] + c.get("aliases", [])
+        if any(name_lower in x.lower() or x.lower() in name_lower for x in candidates):
+            return c
+    return None
+
+
+def _build_letter(
+    carrier_name: str,
+    carrier_department: str,
+    carrier_address_block: str,
+    client_name: str,
+    client_ssn_last4: str,
+    policy_numbers: list[str],
+    current_agent_name: str,
+    current_agent_npn: str,
+    new_agent_name: str,
+    new_agent_npn: str,
+    new_bd_name: str,
+    new_bd_dtcc_id: str,
+    reason_for_change: str,
+    requesting_firm_name: str,
+    requesting_firm_contact: str,
+    requesting_firm_phone: str,
+    trailing_commission: str,
+    effective_date_requested: str,
+) -> str:
+    """Assemble the formal servicing-agent change letter text."""
+    today = date.today().strftime("%B %d, %Y")
+
+    policy_ref = ", ".join(policy_numbers) if len(policy_numbers) <= 3 else (
+        ", ".join(policy_numbers[:3]) + f", and {len(policy_numbers) - 3} additional"
+    )
+
+    eff_line = (
+        f"Requested Effective Date:  {effective_date_requested}"
+        if effective_date_requested
+        else "Requested Effective Date:  As soon as administratively possible"
+    )
+
+    tc_map = {
+        "yes":     "The new servicing agent WILL receive trailing commissions on this contract.",
+        "no":      "The new servicing agent will NOT receive trailing commissions on this contract.",
+        "unknown": "Please apply your standard trailing commission arrangement for the new servicing agent.",
+    }
+    tc_line = tc_map.get(trailing_commission.lower(), tc_map["unknown"])
+
+    SEP = "-" * 72
+
+    return f"""{requesting_firm_name}
+{"=" * len(requesting_firm_name)}
+Contact: {requesting_firm_contact}
+Phone:   {requesting_firm_phone}
+Date:    {today}
+
+
+{carrier_name}
+{carrier_department}
+{carrier_address_block}
+
+
+Re:   Request for Servicing Agent / Broker of Record Change
+      Policy Number(s): {policy_ref}
+      Policyholder:     {client_name} (SSN last 4: {client_ssn_last4})
+
+
+Dear {carrier_department},
+
+We are writing on behalf of {new_bd_name} (DTCC Firm ID: {new_bd_dtcc_id}) to formally
+request a change of servicing agent for the above-referenced annuity contract(s).
+This request is made with the full knowledge and authorization of the policy owner.
+
+Please note: A policy inquiry was submitted through DTCC and returned no contracts
+found, indicating these contracts are not currently accessible via the DTCC platform.
+We are therefore submitting this request directly to your company.
+
+{SEP}
+  CONTRACT INFORMATION
+{SEP}
+  Policyholder:           {client_name}
+  SSN (last 4 digits):    {client_ssn_last4}
+  Policy Number(s):       {", ".join(policy_numbers)}
+
+{SEP}
+  CURRENT SERVICING AGENT (TO BE REMOVED)
+{SEP}
+  Agent Name:             {current_agent_name}
+  National Producer No.:  {current_agent_npn}
+
+{SEP}
+  NEW SERVICING AGENT (TO BE ASSIGNED)
+{SEP}
+  Agent Name:             {new_agent_name}
+  National Producer No.:  {new_agent_npn}
+  Broker/Dealer:          {new_bd_name}
+  DTCC Firm ID:           {new_bd_dtcc_id}
+  {eff_line}
+
+{SEP}
+  TRAILING COMMISSION
+{SEP}
+  {tc_line}
+
+{SEP}
+  REASON FOR CHANGE
+{SEP}
+  {reason_for_change}
+
+We represent that the incoming servicing agent, {new_agent_name} (NPN: {new_agent_npn}),
+holds all required licenses in the applicable jurisdiction(s) and has an active
+appointment with {carrier_name}. Supporting documentation is enclosed if required.
+
+Please process this servicing agent change at your earliest convenience and
+confirm completion in writing to the contact listed above.
+
+If you have any questions or require additional documentation, please do not
+hesitate to contact us.
+
+Sincerely,
+
+
+_________________________________________
+{requesting_firm_contact}
+Authorized Representative, {requesting_firm_name}
+
+
+Enclosures (as applicable):
+  * Copy of policy owner authorization / client signature
+  * Incoming producer's state insurance license(s)
+  * Carrier appointment confirmation for {new_agent_name}
+  * DTCC "no contracts found" response (if available)
+"""
+
+
+def _letter_to_pdf_base64(letter_text: str) -> str:
+    """Render letter_text to a PDF and return it as a Base64 string."""
+
+    def _is_separator(s: str) -> bool:
+        return len(s) >= 8 and len(set(s)) == 1 and s[0] in "-=_*"
+
+    def _ascii_safe(s: str) -> str:
+        return (
+            s.replace("\u2500", "-").replace("\u2502", "|")
+             .replace("\u2014", "--").replace("\u2013", "-")
+             .replace("\u2022", "*").replace("\u2019", "'")
+             .replace("\u2018", "'").replace("\u201c", '"')
+             .replace("\u201d", '"').replace("\u2026", "...")
+        )
+
+    pdf = FPDF()
+    pdf.set_margins(left=25, top=25, right=25)
+    pdf.add_page()
+
+    # Header band
+    pdf.set_fill_color(30, 60, 114)
+    pdf.rect(0, 0, 210, 12, "F")
+    pdf.set_font("Helvetica", "B", size=9)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_xy(25, 3)
+    pdf.cell(0, 6, "SERVICING AGENT CHANGE REQUEST  |  CONFIDENTIAL", ln=True)
+
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_y(20)
+
+    for line in letter_text.split("\n"):
+        stripped = _ascii_safe(line.rstrip())
+        if stripped == "":
+            pdf.ln(4)
+        elif _is_separator(stripped):
+            if stripped[0] == "=":
+                pdf.set_draw_color(30, 60, 114)
+                pdf.set_line_width(0.5)
+            else:
+                pdf.set_draw_color(180, 180, 180)
+                pdf.set_line_width(0.3)
+            y = pdf.get_y()
+            pdf.line(25, y, 185, y)
+            pdf.ln(2)
+        else:
+            pdf.set_x(pdf.l_margin)
+            if stripped.startswith(("Re:", "Dear")):
+                pdf.set_font("Helvetica", "B", size=10)
+            elif stripped.isupper() and len(stripped) > 8:
+                pdf.set_font("Helvetica", "B", size=9)
+                pdf.set_text_color(30, 60, 114)
+            elif stripped.startswith("_____"):
+                pdf.set_font("Helvetica", size=10)
+                pdf.set_text_color(0, 0, 0)
+            else:
+                pdf.set_font("Helvetica", size=9)
+                pdf.set_text_color(0, 0, 0)
+            pdf.multi_cell(0, 5, stripped)
+            pdf.set_text_color(0, 0, 0)
+
+    # Footer
+    pdf.set_y(-18)
+    pdf.set_draw_color(30, 60, 114)
+    pdf.set_line_width(0.3)
+    pdf.line(25, pdf.get_y(), 185, pdf.get_y())
+    pdf.ln(2)
+    pdf.set_font("Helvetica", "I", size=7)
+    pdf.set_text_color(120, 120, 120)
+    pdf.cell(0, 4, "Generated by BD Change Process Agent  |  For authorized use only", align="C")
+
+    pdf_bytes = pdf.output()
+    return base64.b64encode(pdf_bytes).decode("utf-8")
+
+
+@BP.route('/generate-carrier-letter', methods=['POST'])
+def generate_carrier_letter():
+    """
+    Generate a formal off-DTCC servicing agent change letter addressed to the carrier.
+
+    Used when a DTCC Policy Inquiry returned 'no contracts found' and the broker-dealer
+    must contact the carrier directly. Generates both the letter text and a PDF.
+
+    The carrier directory is consulted to fill in the mailing address and surface any
+    carrier-specific requirements (proprietary form required, notarization, etc.).
+
+    Required header:
+      transactionId: <UUID>
+
+    Required body fields (see schemas/carrier_letter_request.schema.json):
+      requestId           string   Caller-supplied identifier
+      carrierName         string   Carrier name or alias (directory lookup performed)
+      client.name         string   Full name of the policy owner
+      client.ssnLast4     string   Last 4 digits of SSN
+      policyNumbers       array    List of policy/contract numbers
+      currentAgent        object   name + npn of agent being replaced
+      newAgent            object   name, npn, bdName, bdDtccId of incoming agent
+      reasonForChange     string   Plain-language reason
+      trailingCommission  string   "yes" | "no" | "unknown"
+      requestingFirm      object   name, contact, phone of the submitting BD
+
+    Optional:
+      carrierDepartment          string   Overrides directory default
+      carrierAddress             object   Full address — required if carrier not in directory
+      effectiveDateRequested     string   YYYY-MM-DD; omit for 'as soon as possible'
+
+    Response codes:
+      GENERATED           — letter and PDF produced successfully
+      CARRIER_OWN_FORM    — carrier requires its own proprietary form; letter not generated
+      VALIDATION_ERROR    — missing required fields or carrier address unresolvable
+    """
+    transaction_id, error = validate_transaction_id(request.headers)
+    if error:
+        return error
+
+    data = request.get_json(silent=True)
+    if not data:
+        return create_error_response("INVALID_PAYLOAD", "JSON request body is required", 400)
+
+    required = ["requestId", "carrierName", "client", "policyNumbers",
+                "currentAgent", "newAgent", "reasonForChange",
+                "trailingCommission", "requestingFirm"]
+    missing = [f for f in required if not data.get(f)]
+    if missing:
+        return create_error_response(
+            "VALIDATION_ERROR", f"Missing required fields: {', '.join(missing)}", 400
+        )
+
+    request_id = data["requestId"]
+    logger.info("Carrier letter generation — transactionId=%s requestId=%s", transaction_id, request_id)
+
+    # Carrier lookup
+    carriers = _load_carrier_directory()
+    carrier_record = _lookup_carrier(data["carrierName"], carriers)
+
+    # Surface carrier-specific requirements
+    requirements = carrier_record.get("requirements", {}) if carrier_record else {}
+    if requirements.get("use_own_form"):
+        form_name = requirements.get("own_form_name", "the carrier's proprietary form")
+        logger.info("Carrier requires own form — requestId=%s carrier=%s", request_id, data["carrierName"])
+        return create_response(
+            "CARRIER_OWN_FORM",
+            f"{data['carrierName']} requires the use of {form_name}. "
+            "A generic letter cannot be generated for this carrier. "
+            "Please obtain the carrier's proprietary form.",
+            transaction_id,
+            {
+                "carrierName": carrier_record["carrier_name"],
+                "ownFormName": form_name,
+                "notes": requirements.get("notes", ""),
+                "portalUrl": carrier_record.get("correspondence", {}).get("portal_url"),
+            },
+            200,
+        )
+
+    # Resolve carrier address
+    addr_override = data.get("carrierAddress")
+    if addr_override:
+        addr_lines = [addr_override["line1"]]
+        if addr_override.get("line2"):
+            addr_lines.append(addr_override["line2"])
+        addr_lines.append(f"{addr_override['city']}, {addr_override['state']} {addr_override['zip']}")
+        carrier_address_block = "\n".join(addr_lines)
+        carrier_full_name = data["carrierName"]
+        carrier_department = data.get("carrierDepartment", "Annuity Service Center")
+    elif carrier_record:
+        corr = carrier_record.get("correspondence", {})
+        addr = corr.get("address", {})
+        addr_lines = [addr.get("line1", "")]
+        if addr.get("line2"):
+            addr_lines.append(addr["line2"])
+        addr_lines.append(f"{addr.get('city', '')}, {addr.get('state', '')} {addr.get('zip', '')}")
+        carrier_address_block = "\n".join(addr_lines)
+        carrier_full_name = carrier_record["carrier_name"]
+        carrier_department = data.get("carrierDepartment") or carrier_record.get("servicing_department", "Annuity Service Center")
+    else:
+        return create_error_response(
+            "VALIDATION_ERROR",
+            f"Carrier '{data['carrierName']}' not found in directory and no carrierAddress provided.",
+            400,
+        )
+
+    client = data["client"]
+    new_agent = data["newAgent"]
+    current_agent = data["currentAgent"]
+    firm = data["requestingFirm"]
+
+    try:
+        letter_text = _build_letter(
+            carrier_name=carrier_full_name,
+            carrier_department=carrier_department,
+            carrier_address_block=carrier_address_block,
+            client_name=client["name"],
+            client_ssn_last4=client["ssnLast4"],
+            policy_numbers=data["policyNumbers"],
+            current_agent_name=current_agent["name"],
+            current_agent_npn=current_agent["npn"],
+            new_agent_name=new_agent["name"],
+            new_agent_npn=new_agent["npn"],
+            new_bd_name=new_agent["bdName"],
+            new_bd_dtcc_id=new_agent["bdDtccId"],
+            reason_for_change=data["reasonForChange"],
+            requesting_firm_name=firm["name"],
+            requesting_firm_contact=firm["contact"],
+            requesting_firm_phone=firm["phone"],
+            trailing_commission=data["trailingCommission"],
+            effective_date_requested=data.get("effectiveDateRequested", ""),
+        )
+        pdf_base64 = _letter_to_pdf_base64(letter_text)
+    except Exception as e:
+        logger.error("Letter generation failed — requestId=%s: %s", request_id, e, exc_info=True)
+        return create_error_response("GENERATION_ERROR", str(e), 500)
+
+    logger.info("Carrier letter generated — requestId=%s carrier=%s policies=%d",
+                request_id, carrier_full_name, len(data["policyNumbers"]))
+
+    payload = {
+        "letterText": letter_text,
+        "pdfBase64": pdf_base64,
+        "metadata": {
+            "carrier": carrier_full_name,
+            "client": client["name"],
+            "policyNumbers": data["policyNumbers"],
+            "newAgent": new_agent["name"],
+            "generatedDate": date.today().isoformat(),
+            "carrierRequirements": {
+                "wetSignatureRequired": requirements.get("wet_signature_required", True),
+                "notarizationRequired": requirements.get("notarization_required", False),
+                "medallionRequired": requirements.get("medallion_required", False),
+                "notes": requirements.get("notes", ""),
+                "processingTimeDays": carrier_record.get("processing_time_days") if carrier_record else None,
+            } if requirements else {},
+        },
+    }
+
+    return create_response(
+        "GENERATED",
+        f"Carrier letter generated for {carrier_full_name}",
+        transaction_id,
+        payload,
         200,
         processing_mode="immediate",
     )
