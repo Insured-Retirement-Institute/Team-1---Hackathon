@@ -26,10 +26,11 @@ CARRIER_TABLES = {
 }
 
 # Carrier-specific configurations for direct carrier endpoints
+# Policy numbers are stored without prefix in carrier-specific tables
 CARRIER_CONFIGS = {
-    "athene": {"table": "carrier", "carrierName": "Athene", "prefix": "ATH"},
-    "paclife": {"table": "carrier-2", "carrierName": "Pacific Life", "prefix": "PAC"},
-    "prudential": {"table": "carrier-3", "carrierName": "Prudential", "prefix": "PRU"},
+    "athene": {"table": "carrier", "carrierName": "Athene", "carrierId": "ATH1"},
+    "paclife": {"table": "carrier-2", "carrierName": "Pacific Life", "carrierId": "PAC1"},
+    "prudential": {"table": "carrier-3", "carrierName": "Prudential", "carrierId": "PRU1"},
 }
 
 # Value mappings from carrier DB format to API spec format
@@ -91,6 +92,7 @@ def lookup_policy(policy_number: str) -> dict:
 def lookup_policy_from_table(policy_number: str, table_name: str, carrier_name: str) -> dict:
     """
     Look up a policy from a specific carrier table.
+    Policy numbers are stored without carrier prefix.
     Returns the policy record or None if not found.
     """
     policy = get_item(
@@ -179,7 +181,6 @@ def _process_carrier_policy_inquiry(carrier_key: str):
 
     table_name = carrier_config["table"]
     carrier_name = carrier_config["carrierName"]
-    expected_prefix = carrier_config["prefix"]
 
     transaction_id, error = validate_transaction_id(request.headers)
     if error:
@@ -222,18 +223,7 @@ def _process_carrier_policy_inquiry(carrier_key: str):
         ssn_last4 = client_ssn[-4:] if client_ssn and len(client_ssn) >= 4 else None
 
         for policy_number in policy_numbers:
-            # Validate policy belongs to this carrier
-            if not policy_number.startswith(expected_prefix):
-                policies.append({
-                    "policyNumber": policy_number,
-                    "carrierName": carrier_name,
-                    "errors": [{
-                        "errorCode": "wrongCarrier",
-                        "message": f"Policy {policy_number} does not belong to {carrier_name}"
-                    }]
-                })
-                continue
-
+            # Look up policy directly (no prefix validation needed)
             policy = lookup_policy_from_table(policy_number, table_name, carrier_name)
             if policy:
                 if not client_name_from_db:
