@@ -47,7 +47,7 @@ function getRecordIndex(id: string | number): number {
 				<div
 					v-for="record in custodialRecords"
 					:key="record.id"
-					class="w-1/2"
+					class="w-full"
 				>
 					<ManualContractDetailsCard
 						v-model="contractResultsStore.dtccContractResults[getRecordIndex(record.id)]!"
@@ -69,7 +69,7 @@ function getRecordIndex(id: string | number): number {
 				<div
 					v-for="record in unresolvedRecords"
 					:key="record.id"
-					class="w-1/2"
+					class="w-full"
 				>
 					<ManualContractDetailsCard
 						v-model="contractResultsStore.dtccContractResults[getRecordIndex(record.id)]!"

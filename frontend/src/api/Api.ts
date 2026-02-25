@@ -8,7 +8,8 @@ import type {
 	TransferNotification,
 	TransactionStatus,
 	StandardResponse,
-	PdfExtractionRequest
+	PdfExtractionRequest,
+	CarrierLetterRequest
 } from '@/models/ClearinghouseApi'
 import { monotonicFactory } from "ulid";
 
@@ -152,6 +153,14 @@ export const brokerDealerApi = {
 		request: PdfExtractionRequest
 	): Promise<StandardResponse> =>
 		fetchJson(`${BROKER_DEALER_API}/extract-policy-from-pdf`, {
+			method: 'POST',
+			body: JSON.stringify(request)
+		}),
+
+	generateCarrierLetter: (
+		request: CarrierLetterRequest
+	): Promise<StandardResponse> =>
+		fetchJson(`${BROKER_DEALER_API}/generate-carrier-letter`, {
 			method: 'POST',
 			body: JSON.stringify(request)
 		})
