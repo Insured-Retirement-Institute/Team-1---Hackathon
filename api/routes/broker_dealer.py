@@ -25,6 +25,7 @@ from helpers import (create_response,
 from lib.utils.dynamodb_utils import get_item, put_item, update_item, scan_items, Attr
 
 BP = Blueprint('broker-dealer', __name__)
+URL_PREFIX = "/v1/broker-dealer"
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

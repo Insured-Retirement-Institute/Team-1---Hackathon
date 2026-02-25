@@ -7,9 +7,9 @@ info:
     name: Broker-Dealer API Team
     email: api-support@example.com
 servers:
-  - url: https://api.example.com/v1
+  - url: https://api.example.com/v1/broker-dealer
     description: Production server
-  - url: https://api-staging.example.com/v1
+  - url: https://api-staging.example.com/v1/broker-dealer
     description: Staging server
 
 paths:
