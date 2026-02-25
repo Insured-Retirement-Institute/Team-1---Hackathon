@@ -1,13 +1,13 @@
 """
 Distributor API Lambda Handler
-Single-table DynamoDB design for agent/client/contract/transaction management.
+Single-table DynamoDB design for agent/client/contract/request management.
 
 Routes:
   GET  /agent/{npn}                    - Get agent profile
   GET  /agent/{npn}/clients            - Get all clients for agent
   POST /agent/{npn}/clients            - Create new client for agent
-  GET  /agent/{npn}/transactions       - Get all transactions for agent
-  POST /agent/{npn}/transactions       - Create new transaction
+  GET  /agent/{npn}/requests           - Get all requests for agent
+  POST /agent/{npn}/requests           - Create new request
   GET  /client/{clientId}              - Get client profile
   GET  /client/{clientId}/contracts    - Get all contracts for client
 """
@@ -110,14 +110,14 @@ def create_client(npn, body):
     return response(201, {'message': 'Client created', 'client': client_profile})
 
 
-def get_agent_transactions(npn):
-    """Get all transactions for an agent."""
+def get_agent_requests(npn):
+    """Get all requests for an agent."""
     table = get_table()
     result = table.query(
-        KeyConditionExpression=Key('pk').eq(f'AGENT#{npn}') & Key('sk').begins_with('TRANSACTION#')
+        KeyConditionExpression=Key('pk').eq(f'AGENT#{npn}') & Key('sk').begins_with('REQUEST#')
     )
-    transactions = result.get('Items', [])
-    return response(200, {'transactions': transactions, 'count': len(transactions)})
+    requests = result.get('Items', [])
+    return response(200, {'requests': requests, 'count': len(requests)})
 
 
 def get_client(client_id):
@@ -140,8 +140,8 @@ def get_client_contracts(client_id):
     return response(200, {'contracts': contracts, 'count': len(contracts)})
 
 
-def create_transaction(npn, body):
-    """Create a new transaction for an agent."""
+def create_request(npn, body):
+    """Create a new request for an agent."""
     table = get_table()
 
     # Validate required fields
@@ -165,19 +165,19 @@ def create_transaction(npn, body):
 
     client = client_link['Item']
 
-    # Create transaction
-    tx_id = str(uuid.uuid4())
+    # Create request
+    req_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
-    transaction = {
+    request_item = {
         'pk': f'AGENT#{npn}',
-        'sk': f'TRANSACTION#{tx_id}',
-        'type': 'Transaction',
-        'transactionId': tx_id,
+        'sk': f'REQUEST#{req_id}',
+        'type': 'Request',
+        'requestId': req_id,
         'clientId': client_id,
         'clientName': client.get('clientName'),
         'contracts': body['contracts'],
-        'transactionType': body.get('transactionType', 'BD_CHANGE'),
+        'requestType': body.get('requestType', 'BD_CHANGE'),
         'status': 'MANIFEST_REQUESTED',
         'receivingBrokerId': body['receivingBrokerId'],
         'deliveringBrokerId': agent.get('firmId'),
@@ -185,9 +185,9 @@ def create_transaction(npn, body):
         'updatedAt': now
     }
 
-    table.put_item(Item=transaction)
+    table.put_item(Item=request_item)
 
-    return response(201, {'message': 'Transaction created', 'transaction': transaction})
+    return response(201, {'message': 'Request created', 'request': request_item})
 
 
 def handler(event, context):
@@ -224,13 +224,13 @@ def handler(event, context):
         if len(segments) == 3 and segments[0] == 'agent' and segments[2] == 'clients' and http_method == 'POST':
             return create_client(segments[1], body)
 
-        # Route: GET /agent/{npn}/transactions
-        if len(segments) == 3 and segments[0] == 'agent' and segments[2] == 'transactions' and http_method == 'GET':
-            return get_agent_transactions(segments[1])
+        # Route: GET /agent/{npn}/requests
+        if len(segments) == 3 and segments[0] == 'agent' and segments[2] == 'requests' and http_method == 'GET':
+            return get_agent_requests(segments[1])
 
-        # Route: POST /agent/{npn}/transactions
-        if len(segments) == 3 and segments[0] == 'agent' and segments[2] == 'transactions' and http_method == 'POST':
-            return create_transaction(segments[1], body)
+        # Route: POST /agent/{npn}/requests
+        if len(segments) == 3 and segments[0] == 'agent' and segments[2] == 'requests' and http_method == 'POST':
+            return create_request(segments[1], body)
 
         # Route: GET /client/{clientId}
         if len(segments) == 2 and segments[0] == 'client' and http_method == 'GET':

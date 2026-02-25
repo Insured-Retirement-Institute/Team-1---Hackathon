@@ -41,6 +41,19 @@ for filename in os.listdir(routes_dir):
         except Exception as e:
             print(f"Failed to import {module_name}: {e}")
 
+# ==== Unified Brokerage Transfer API (v0.1.1 spec) =====================================
+try:
+    from routes.v0_unified import (
+        servicing_agent_changes_bp,
+        transfer_notifications_bp,
+        status_bp,
+    )
+    app.register_blueprint(servicing_agent_changes_bp, url_prefix="/v1/servicing-agent-changes")
+    app.register_blueprint(transfer_notifications_bp, url_prefix="/v1/transfer-notifications")
+    app.register_blueprint(status_bp, url_prefix="/v1/status")
+except Exception as e:
+    print(f"Failed to register unified API blueprints: {e}")
+
 
 @app.route('/v1/health', methods=['GET'])
 def health_check():
