@@ -1,0 +1,1335 @@
+openapi: 3.1.0
+info:
+  title: Unified Brokerage Transfer API
+  description: |
+    API specification for facilitating brokerage transfer processes in the annuity industry.
+    This API enables the complete broker change workflow as defined in the transfer process.
+    
+    **Brokerage Transfer Process:**
+    The API supports the following workflow steps:
+    1. **Manifest Request** - Receiving broker submits client account list to identify policies
+    2. **Policy Response** - Delivering broker provides detailed policy information and validation
+    3. **Due Diligence** - Receiving broker reviews and determines transfer eligibility
+    4. **BD Change Validation** - Insurance carriers validate and approve/reject broker changes
+    5. **Transfer Processing** - Delivering broker processes outgoing transfer
+    6. **Transfer Confirmation** - Final confirmation and service agent change notification
+    
+    **Routing Philosophy:**
+    The standard preference is to use a central clearinghouse for orchestrating transfers, ensuring 
+    standardized processing and audit trails. However, the transfer process may be conducted 
+    directly with responsible entities implementing this standard when:
+    - Direct entity relationships exist
+    - Performance requirements demand reduced latency
+    - Policy-to-entity mapping enables targeted routing
+    
+    **Immediate vs. Deferred Responses:**
+    All operations except status queries support both immediate and deferred response patterns:
+    - **Immediate**: Entity provides complete response data with payload
+    - **Deferred**: Entity acknowledges request and processes asynchronously
+    This flexibility accommodates varying processing capabilities and integration patterns.
+    
+  version: 1.0.0
+  contact:
+    name: Unified Brokerage Transfer API Team
+    email: api-support@example.com
+servers:
+  - url: https://api.example.com/v1
+    description: Production server
+  - url: https://api-staging.example.com/v1
+    description: Staging server
+
+paths:
+  /policy-inquiry:
+    post:
+      summary: Policy inquiry
+      description: |
+        Process policy inquiry request to provide policy information for specified accounts.
+        
+        **Immediate vs. Deferred Response:**
+        - **Immediate**: Entity provides complete policy data in response payload
+        - **Deferred**: Entity acknowledges request and processes asynchronously, completing via policy-inquiry-response endpoint
+        
+        **Universal Implementation:**
+        - Any entity (clearinghouse, broker-dealer, carrier) can implement this endpoint
+        - Entity determines routing: respond immediately, defer, or route to appropriate system
+        - Transaction ID flows through all related requests for tracking
+        
+        **Response Behaviors by Entity Type:**
+        - **Clearinghouse**: Can respond immediately (cached data) or route to delivering broker
+        - **Broker-Dealer**: Can respond immediately or defer for processing
+        - **Insurance Carrier**: Can respond immediately or defer, supports direct broker requests
+        
+        **Direct Entity Communication:**
+        Partners can call this endpoint directly on any entity when:
+        - Policy-to-entity mapping is known
+        - Faster response times are required  
+        - Direct integration is preferred
+        - Traditional clearinghouse routing is unavailable
+      operationId: submitPolicyInquiryRequest
+      parameters:
+        - name: transactionId
+          in: header
+          required: true
+          description: Unique transaction identifier that flows through all related requests
+          schema:
+            type: string
+            format: uuid
+        - name: correlationId
+          in: header
+          required: false
+          description: Optional correlation identifier for request tracking and debugging
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PolicyInquiryRequest'
+      responses:
+        '200':
+          description: |
+            Policy inquiry request received successfully. Response may contain:
+            - **Immediate Success**: Complete policy data in payload (PolicyInquiryResponse)
+            - **Immediate Not Found**: Policy not found response in payload (PolicyNotFoundResponse) 
+            - **Deferred Processing**: Null payload, processing continues asynchronously
+            - **Routed Request**: Null payload, request forwarded to another entity
+          headers:
+            correlationId:
+              description: Correlation ID returned from request header
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardResponse'
+              examples:
+                immediate_success:
+                  summary: Immediate response with policy data
+                  value:
+                    code: "IMMEDIATE"
+                    message: "Policy information retrieved successfully"
+                    transactionId: "123e4567-e89b-12d3-a456-426614174000"
+                    payload:
+                      requestingFirm:
+                        firmName: "Example Wealth Management"
+                        firmId: "12345"
+                        servicingAgent:
+                          agentName: "John Smith"
+                          npn: "987654321"
+                      producerValidation:
+                        agentName: "John Smith"
+                        npn: "987654321"
+                        errors: []
+                      client:
+                        clientName: "Jane Doe"
+                        ssnLast4: "1234"
+                        policies: []
+                      enums:
+                        accountType: ["individual", "joint", "trust", "custodial", "entity"]
+                        planType: ["nonQualified", "rothIra", "traditionalIra", "sep", "simple"]
+                immediate_not_found:
+                  summary: Immediate response when policies not found
+                  value:
+                    code: "NOT_FOUND"
+                    message: "Policy inquiry completed - policies not found"
+                    transactionId: "123e4567-e89b-12d3-a456-426614174000"
+                    payload:
+                      requestingFirm:
+                        firmName: "Example Wealth Management"
+                        firmId: "12345"
+                        servicingAgent:
+                          agentName: "John Smith"
+                          npn: "987654321"
+                      client:
+                        clientName: "Jane Doe"
+                        ssnLast4: "1234"
+                      notFoundPolicyNumbers: ["ABC123456", "DEF789012"]
+                      message: "The requested policy numbers were not found in our system"
+                deferred_response:
+                  summary: Deferred processing response
+                  value:
+                    code: "DEFERRED"
+                    message: "Policy inquiry request accepted for processing"
+                    transactionId: "123e4567-e89b-12d3-a456-426614174000"
+                    payload: null
+                    estimatedResponseTime: "PT15M"
+        '400':
+          description: Bad request - invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Entity not capable of processing request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapabilityResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /policy-inquiry-callback:
+    post:
+      summary: Policy inquiry callback
+      description: |
+        Submit detailed policy information response after processing a deferred request.
+        
+        **Universal Implementation:**
+        - Used by any entity to forward/submit policy inquiry responses
+        - Maintains transaction ID consistency across routing
+        - Supports both direct responses and clearinghouse-mediated flows
+        
+        **Usage Patterns:**
+        - **To Clearinghouse**: Delivering broker or carrier submits response for forwarding
+        - **Direct to Requester**: Entity responds directly to original requesting party
+        - **Internal Processing**: Entity processes deferred requests asynchronously
+      operationId: submitPolicyInquiryResponse
+      parameters:
+        - name: transactionId
+          in: header
+          required: true
+          description: Unique transaction identifier that flows through all related requests
+          schema:
+            type: string
+            format: uuid
+        - name: correlationId
+          in: header
+          required: false
+          description: Optional correlation identifier for request tracking and debugging
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/PolicyInquiryResponse'
+                - $ref: '#/components/schemas/PolicyNotFoundResponse'
+      responses:
+        '200':
+          description: |
+            Policy inquiry response submitted successfully. This endpoint acknowledges receipt of:
+            - **PolicyInquiryResponse**: Complete policy data and validation results
+            - **PolicyNotFoundResponse**: Confirmation that requested policies were not found
+            The response confirms the callback was processed and may trigger further routing or notifications.
+          headers:
+            correlationId:
+              description: Correlation ID returned from request header
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardResponse'
+              examples:
+                success_callback_acknowledged:
+                  summary: Successful callback acknowledgment
+                  value:
+                    code: "RECEIVED"
+                    message: "Policy inquiry response processed successfully"
+                    transactionId: "123e4567-e89b-12d3-a456-426614174000"
+                    payload: null
+                not_found_callback_acknowledged:
+                  summary: Policy not found callback acknowledgment
+                  value:
+                    code: "RECEIVED"
+                    message: "Policy not found response processed successfully"
+                    transactionId: "123e4567-e89b-12d3-a456-426614174000"
+                    payload: null
+        '400':
+          description: Bad request - invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Entity not capable of processing request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapabilityResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+
+  /bd-change:
+    post:
+      summary: Brokerage dealer change
+      description: |
+        Accept brokerage dealer change request for specific policies.
+        
+        **Universal Implementation:**
+        - Any entity can receive and process BD change requests
+        - Entity determines validation approach and routing
+        - Supports both validation and forwarding scenarios
+        
+        **Entity-Specific Behaviors:**
+        - **Insurance Carrier**: Validates licensing, appointments, suitability, policy rules
+        - **Clearinghouse**: Routes to appropriate carriers or validators
+        - **Broker-Dealer**: May validate internal rules or forward to clearinghouse/carriers
+      operationId: receiveBdChangeRequest
+      parameters:
+        - name: transactionId
+          in: header
+          required: true
+          description: Unique transaction identifier that flows through all related requests
+          schema:
+            type: string
+            format: uuid
+        - name: correlationId
+          in: header
+          required: false
+          description: Optional correlation identifier for request tracking and debugging
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BdChangeRequest'
+      responses:
+        '200':
+          description: BD change request received successfully
+          headers:
+            correlationId:
+              description: Correlation ID returned from request header
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardResponse'
+        '400':
+          description: Bad request - invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Entity not capable of processing request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapabilityResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /bd-change-callback:
+    post:
+      summary: BD change callback
+      description: |
+        Accept validation response (approval/rejection) from insurance carrier or forwarding entity.
+        
+        **Universal Implementation:**
+        - Any entity can receive carrier validation responses
+        - Supports direct carrier responses and clearinghouse-mediated flows
+        - Transaction ID maintained for end-to-end tracking
+      operationId: receiveCarrierResponse
+      parameters:
+        - name: transactionId
+          in: header
+          required: true
+          description: Unique transaction identifier that flows through all related requests
+          schema:
+            type: string
+            format: uuid
+        - name: correlationId
+          in: header
+          required: false
+          description: Optional correlation identifier for request tracking and debugging
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CarrierResponse'
+      responses:
+        '200':
+          description: Carrier response received successfully
+          headers:
+            correlationId:
+              description: Correlation ID returned from request header
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardResponse'
+        '400':
+          description: Bad request - invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Entity not capable of processing request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapabilityResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /transfer-notification:
+    post:
+      summary: Transfer notification
+      description: |
+        Accept transfer-related notifications and confirmations.
+        
+        **Universal Implementation:**
+        - Any entity can receive transfer notifications
+        - Supports various notification types (approval, initiation, completion)
+        - Flexible routing based on entity role and business rules
+      operationId: receiveTransferNotification
+      parameters:
+        - name: transactionId
+          in: header
+          required: true
+          description: Unique transaction identifier that flows through all related requests
+          schema:
+            type: string
+            format: uuid
+        - name: correlationId
+          in: header
+          required: false
+          description: Optional correlation identifier for request tracking and debugging
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferNotification'
+      responses:
+        '200':
+          description: Transfer notification received successfully
+          headers:
+            correlationId:
+              description: Correlation ID returned from request header
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardResponse'
+        '400':
+          description: Bad request - invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Entity not capable of processing request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapabilityResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /transfer-confirmation:
+    post:
+      summary: Transfer confirmation
+      description: |
+        Accept transfer confirmation from delivering entity or clearinghouse.
+        
+        **Universal Implementation:**
+        - Any entity can receive transfer confirmations
+        - Supports final confirmation notifications
+        - Transaction ID maintained for complete audit trail
+      operationId: receiveTransferConfirmation
+      parameters:
+        - name: transactionId
+          in: header
+          required: true
+          description: Unique transaction identifier that flows through all related requests
+          schema:
+            type: string
+            format: uuid
+        - name: correlationId
+          in: header
+          required: false
+          description: Optional correlation identifier for request tracking and debugging
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferConfirmation'
+      responses:
+        '200':
+          description: Transfer confirmation received successfully
+          headers:
+            correlationId:
+              description: Correlation ID returned from request header
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardResponse'
+        '400':
+          description: Bad request - invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Entity not capable of processing request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapabilityResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /query-status/{transactionId}:
+    get:
+      summary: Query transaction status
+      description: |
+        Retrieve current status and history for a specific transaction.
+        
+        **Universal Implementation:**
+        - Any entity can provide transaction status information
+        - Always returns immediate response (no deferred processing)
+        - Status information may vary based on entity role and visibility
+        
+        **Entity-Specific Status Views:**
+        - **Clearinghouse**: Complete transaction orchestration view
+        - **Broker-Dealer**: Role-specific status and relevant updates
+        - **Insurance Carrier**: Validation and policy-focused status information
+      operationId: queryTransactionStatus
+      parameters:
+        - name: transactionId
+          in: path
+          required: true
+          description: Unique transaction identifier
+          schema:
+            type: string
+            format: uuid
+        - name: correlationId
+          in: header
+          required: false
+          description: Optional correlation identifier for request tracking and debugging
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Transaction status retrieved successfully
+          headers:
+            correlationId:
+              description: Correlation ID returned from request header
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionStatus'
+        '404':
+          description: Transaction not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Entity not capable of providing transaction status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapabilityResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    PolicyInquiryRequest:
+      type: object
+      required:
+        - requestingFirm
+        - client
+      properties:
+        requestingFirm:
+          type: object
+          required:
+            - firmName
+            - firmId
+            - servicingAgent
+          properties:
+            firmName:
+              type: string
+              nullable: true
+              description: Name of the requesting firm
+              # STYLE GUIDE DISCREPANCY: Should be 'name' per style guide for business entities
+            firmId:
+              type: string
+              nullable: true
+              description: Identifier of the requesting firm
+            servicingAgent:
+              type: object
+              required:
+                - agentName
+                - npn
+              properties:
+                agentName:
+                  type: string
+                  nullable: true
+                  description: Name of the servicing agent
+                  # STYLE GUIDE DISCREPANCY: Should use 'producer' terminology per style guide
+                npn:
+                  type: string
+                  nullable: true
+                  description: National Producer Number of the agent
+        client:
+          type: object
+          required:
+            - clientName
+            - ssn
+            - policyNumbers
+          properties:
+            clientName:
+              type: string
+              nullable: true
+              description: Name of the client
+            ssn:
+              type: string
+              nullable: true
+              description: Social Security Number of the client
+              # STYLE GUIDE NOTE: Could be 'taxId' per style guide but SSN is domain-specific
+            policyNumbers:
+              type: array
+              items:
+                type: string
+              description: List of policy numbers for the client
+              # STYLE GUIDE COMPLIANT: Uses 'policyNumber' as specified
+
+    PolicyNotFoundResponse:
+      type: object
+      required:
+        - requestingFirm
+        - client
+        - notFoundPolicyNumbers
+      properties:
+        requestingFirm:
+          type: object
+          required:
+            - firmName
+            - firmId
+            - servicingAgent
+          properties:
+            firmName:
+              type: string
+              nullable: true
+              description: Echoed requesting firm name from the request
+            firmId:
+              type: string
+              nullable: true
+              description: Echoed DTCC firm identifier from the request
+            servicingAgent:
+              type: object
+              required:
+                - agentName
+                - npn
+              properties:
+                agentName:
+                  type: string
+                  nullable: true
+                  description: Echoed agent name from the request
+                npn:
+                  type: string
+                  nullable: true
+                  description: Echoed NPN from the request
+        client:
+          type: object
+          required:
+            - clientName
+            - ssnLast4
+          properties:
+            clientName:
+              type: string
+              nullable: true
+              description: Client name echoed back for confirmation
+            ssnLast4:
+              type: string
+              nullable: true
+              description: Last four digits of the client's SSN for security
+        notFoundPolicyNumbers:
+          type: array
+          items:
+            type: string
+          description: Policy numbers that were requested but not found in system
+        message:
+          type: string
+          description: Human-readable message indicating policies were not found
+          example: "The requested policy numbers were not found in our system"
+
+    PolicyInquiryResponse:
+      type: object
+      required:
+        - requestingFirm
+        - producerValidation
+        - client
+        - enums
+      properties:
+        requestingFirm:
+          type: object
+          required:
+            - firmName
+            - firmId
+            - servicingAgent
+          properties:
+            firmName:
+              type: string
+              nullable: true
+              description: Echoed requesting firm name from the request
+            firmId:
+              type: string
+              nullable: true
+              description: Echoed DTCC firm identifier from the request
+            servicingAgent:
+              type: object
+              required:
+                - agentName
+                - npn
+              properties:
+                agentName:
+                  type: string
+                  nullable: true
+                  description: Echoed agent name from the request
+                npn:
+                  type: string
+                  nullable: true
+                  description: Echoed NPN from the request
+        producerValidation:
+          type: object
+          required:
+            - agentName
+            - npn
+            - errors
+          properties:
+            agentName:
+              type: string
+              nullable: true
+              description: Echoed agent name from the request
+            npn:
+              type: string
+              nullable: true
+              description: Echoed NPN from the request
+            errors:
+              type: array
+              items:
+                $ref: '#/components/schemas/ProducerError'
+              description: Producer-level validation errors
+        client:
+          type: object
+          required:
+            - clientName
+            - ssnLast4
+            - policies
+          properties:
+            clientName:
+              type: string
+              nullable: true
+              description: Client name echoed back for confirmation
+            ssnLast4:
+              type: string
+              nullable: true
+              description: Last four digits of the client's SSN for security
+            policies:
+              type: array
+              items:
+                $ref: '#/components/schemas/DetailedPolicyInfo'
+              description: List of policy details
+        enums:
+          type: object
+          required:
+            - accountType
+            - planType
+          properties:
+            accountType:
+              type: array
+              items:
+                type: string
+                enum: [individual, joint, trust, custodial, entity]
+              description: Valid account type values
+            planType:
+              type: array
+              items:
+                type: string
+                enum: [nonQualified, rothIra, traditionalIra, sep, simple]
+              description: Valid plan type values
+
+    DetailedPolicyInfo:
+      type: object
+      required:
+        - policyNumber
+        - carrierName
+        - accountType
+        - planType
+        - ownership
+        - productName
+        - cusip
+        - trailingCommission
+        - contractStatus
+        - withdrawalStructure
+        - errors
+      properties:
+        policyNumber:
+          type: string
+          nullable: true
+          description: Policy number identifying the policy
+        carrierName:
+          type: string
+          nullable: true
+          description: Name of the insurance carrier that wrote the annuity
+        accountType:
+          type: string
+          enum: [individual, joint, trust, custodial, entity]
+          nullable: true
+          description: Registration type of the account
+        planType:
+          type: string
+          enum: [nonQualified, rothIra, traditionalIra, sep, simple]
+          nullable: true
+          description: Tax qualification type of the account
+        ownership:
+          type: string
+          nullable: true
+          description: Ownership structure of the policy
+        productName:
+          type: string
+          nullable: true
+          description: Name of the annuity product
+        cusip:
+          type: string
+          nullable: true
+          description: CUSIP identifier for the product
+        trailingCommission:
+          type: boolean
+          description: Whether trailing commission will apply to the new servicing agent
+          # STYLE GUIDE DISCREPANCY: Should be 'hasTrailingCommission' or 'isTrailingCommissionEnabled'
+        contractStatus:
+          type: string
+          nullable: true
+          description: Current status of the contract
+        withdrawalStructure:
+          type: object
+          required:
+            - systematicInPlace
+          properties:
+            systematicInPlace:
+              type: boolean
+              description: Whether a systematic withdrawal plan is currently active
+              # STYLE GUIDE DISCREPANCY: Should be 'hasSystematicWithdrawal' or 'isSystematicWithdrawalActive'
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/PolicyError'
+          description: Any errors or issues associated with this policy
+
+    BdChangeRequest:
+      type: object
+      required:
+        - receivingBrokerId
+        - deliveringBrokerId
+        - carrierId
+        - policyNumber
+      properties:
+        receivingBrokerId:
+          type: string
+          description: Identifier of the receiving broker-dealer
+        deliveringBrokerId:
+          type: string
+          description: Identifier of the delivering broker-dealer
+        carrierId:
+          type: string
+          description: Identifier of the insurance carrier
+        policyNumber:
+          type: string
+          description: Policy identifier
+          # STYLE GUIDE COMPLIANT: Uses 'policyNumber' consistently
+        policyDetails:
+          type: object
+          description: Detailed policy information for validation
+        brokerDetails:
+          type: object
+          description: Receiving broker information for validation
+        validationRequirements:
+          type: object
+          description: Specific validation requirements (licensing, appointments, suitability, etc.)
+        requestTimestamp:
+          type: string
+          format: date-time
+          description: When the request was made
+        validationResult:
+          type: string
+          enum: [approved, rejected]
+          description: Carrier validation result (for responses)
+        rejectionReason:
+          type: string
+          description: Reason for rejection (if applicable)
+        approvalDetails:
+          type: object
+          description: Additional approval information (open-ended)
+        responseTimestamp:
+          type: string
+          format: date-time
+          description: When the response was received
+        additionalData:
+          type: object
+          description: Additional request/response data (open-ended)
+
+    CarrierResponse:
+      type: object
+      required:
+        - carrierId
+        - policyNumber
+        - validationResult
+      properties:
+        carrierId:
+          type: string
+          description: Identifier of the insurance carrier
+        policyNumber:
+          type: string
+          description: Policy identifier
+        validationResult:
+          type: string
+          enum: [approved, rejected]
+          description: Validation result
+        rejectionReason:
+          type: string
+          description: Reason for rejection (if applicable)
+        validationDetails:
+          type: object
+          description: Detailed validation results
+          properties:
+            licensingCheck:
+              type: string
+              enum: [passed, failed, not_checked]
+              description: Producer licensing validation result
+            appointmentCheck:
+              type: string
+              enum: [passed, failed, not_checked]
+              description: Producer appointment validation result
+            suitabilityCheck:
+              type: string
+              enum: [passed, failed, not_checked]
+              description: Suitability validation result
+            policyRulesCheck:
+              type: string
+              enum: [passed, failed, not_checked]
+              description: Policy-specific rules validation result
+        effectiveDate:
+          type: string
+          format: date
+          description: Effective date of the change (if approved)
+        additionalData:
+          type: object
+          description: Additional response data (open-ended)
+
+    TransferNotification:
+      type: object
+      required:
+        - notificationType
+        - policyNumber
+      properties:
+        notificationType:
+          type: string
+          enum: [transfer-approved, transfer-initiated, transfer-confirmed, transfer-complete, service-agent-change-complete]
+          description: Type of transfer notification
+        policyNumber:
+          type: string
+          description: Policy identifier
+        receivingBrokerId:
+          type: string
+          description: Identifier of the receiving broker-dealer
+        deliveringBrokerId:
+          type: string
+          description: Identifier of the delivering broker-dealer
+        carrierId:
+          type: string
+          description: Identifier of the insurance carrier
+        effectiveDate:
+          type: string
+          format: date
+          description: Effective date of the transfer
+        notificationTimestamp:
+          type: string
+          format: date-time
+          description: When the notification was sent
+        additionalData:
+          type: object
+          description: Additional notification data (open-ended)
+
+    TransferConfirmation:
+      type: object
+      required:
+        - policyNumber
+        - confirmationStatus
+      properties:
+        policyNumber:
+          type: string
+          description: Policy identifier
+        confirmationStatus:
+          type: string
+          enum: [confirmed, failed, pending]
+          description: Transfer confirmation status
+        deliveringBrokerId:
+          type: string
+          description: Identifier of the delivering broker-dealer
+        transferTimestamp:
+          type: string
+          format: date-time
+          description: When the transfer was processed
+        confirmationDetails:
+          type: object
+          description: Additional confirmation information
+        additionalData:
+          type: object
+          description: Additional confirmation data (open-ended)
+
+    TransactionStatus:
+      type: object
+      required:
+        - currentStatus
+        - createdAt
+        - updatedAt
+      properties:
+        currentStatus:
+          type: string
+          enum: 
+            - MANIFEST_REQUESTED
+            - MANIFEST_RECEIVED
+            - DUE_DILIGENCE_COMPLETE
+            - CARRIER_VALIDATION_PENDING
+            - CARRIER_APPROVED
+            - CARRIER_REJECTED
+            - TRANSFER_INITIATED
+            - TRANSFER_PROCESSING
+            - TRANSFER_CONFIRMED
+            - COMPLETE
+          description: Current transaction status
+        statusHistory:
+          type: array
+          items:
+            $ref: '#/components/schemas/StatusHistoryItem'
+          description: History of status changes
+        createdAt:
+          type: string
+          format: date-time
+          description: Transaction creation timestamp
+        updatedAt:
+          type: string
+          format: date-time
+          description: Last update timestamp
+        entityRole:
+          type: string
+          enum: [clearinghouse, receiving_broker, delivering_broker, insurance_carrier]
+          description: Role of this entity in the transaction
+        entityId:
+          type: string
+          description: Identifier of the entity providing this status
+        policiesAffected:
+          type: array
+          items:
+            type: string
+          description: List of policy numbers affected in this transaction
+        carrierValidationDetails:
+          type: object
+          description: Details about carrier validation process (when applicable)
+        routingInformation:
+          type: object
+          description: Information about request routing and entity communication
+          properties:
+            routingHistory:
+              type: array
+              items:
+                type: object
+                properties:
+                  fromEntity:
+                    type: string
+                    description: Source entity identifier
+                  toEntity:
+                    type: string
+                    description: Target entity identifier
+                  routedAt:
+                    type: string
+                    format: date-time
+                    description: When the request was routed
+                  requestType:
+                    type: string
+                    description: Type of request routed
+        additionalData:
+          type: object
+          description: Additional status data (open-ended)
+
+    StatusHistoryItem:
+      type: object
+      required:
+        - status
+        - timestamp
+      properties:
+        status:
+          type: string
+          description: Status value
+        timestamp:
+          type: string
+          format: date-time
+          description: When status was set
+        entityId:
+          type: string
+          description: Entity that set this status
+        notes:
+          type: string
+          description: Additional notes about status change
+
+    StandardResponse:
+      type: object
+      required:
+        - code
+        - message
+        - transactionId
+      properties:
+        code:
+          type: string
+          description: |
+            Response code indicating the result status.
+            Examples: "IMMEDIATE", "NOT_FOUND", "DEFERRED", "RECEIVED", "ROUTED"
+          example: "IMMEDIATE"
+        message:
+          type: string
+          description: Human-readable response message describing the operation result
+        transactionId:
+          type: string
+          format: uuid
+          description: |
+            Unique transaction identifier for tracking the request.
+            Must be reflected in all subsequent related requests and responses.
+        payload:
+          oneOf:
+            - $ref: '#/components/schemas/PolicyInquiryResponse'
+            - $ref: '#/components/schemas/PolicyNotFoundResponse'
+            - type: object
+              nullable: true
+          description: |
+            Optional response payload containing the actual data.
+            **Universal Payload Behavior:**
+            - **Immediate responses**: Include full response payload when available
+            - **Deferred responses**: Payload is null, processing continues asynchronously
+            - **Routed responses**: Payload null when forwarded to another entity
+            - When present, contains the complete response data
+        estimatedResponseTime:
+          type: string
+          description: |
+            Estimated completion time for deferred responses (ISO 8601 duration format).
+            Examples: "PT5M" (5 minutes), "PT1H" (1 hour), "P1D" (1 day)
+        routingInformation:
+          type: object
+          description: |
+            Information about request routing when requests are forwarded to other entities.
+          properties:
+            targetEntityType:
+              type: string
+              enum: [clearinghouse, broker_dealer, insurance_carrier]
+              description: Type of target entity for routing
+            targetEntityId:
+              type: string
+              description: Identifier of the target entity
+            routedAt:
+              type: string
+              format: date-time
+              description: When the request was routed
+            routingReason:
+              type: string
+              description: Reason for routing (e.g., policy_mapping, business_rule, performance)
+
+    CapabilityResponse:
+      type: object
+      required:
+        - code
+        - message
+        - transactionId
+        - capabilityStatus
+      properties:
+        code:
+          type: string
+          enum: [NOT_CAPABLE]
+          description: Response code indicating lack of capability
+        message:
+          type: string
+          description: Human-readable message explaining the capability limitation
+        transactionId:
+          type: string
+          format: uuid
+          description: Transaction identifier from the request
+        capabilityStatus:
+          type: string
+          enum: [not_supported, temporarily_unavailable, insufficient_data, policy_restriction, system_limitation]
+          description: |
+            Specific capability limitation:
+            - not_supported: Entity does not support this operation
+            - temporarily_unavailable: Entity supports operation but cannot process now
+            - insufficient_data: Entity lacks required data to process request
+            - policy_restriction: Business policy prevents processing
+            - system_limitation: Technical limitations prevent processing
+        capabilityLevel:
+          type: string
+          enum: [none, partial, conditional]
+          description: |
+            Level of capability available:
+            - none: Cannot process any aspect of the request
+            - partial: Can process some aspects but not complete request
+            - conditional: Can process under certain conditions
+        supportedAlternatives:
+          type: array
+          items:
+            type: string
+          description: Alternative approaches or entities that may be able to process the request
+        retryAfter:
+          type: string
+          description: |
+            When capability might be available (for temporarily_unavailable status).
+            ISO 8601 duration or timestamp format.
+        additionalDetails:
+          type: object
+          description: Additional information about the capability limitation
+      example:
+        code: "NOT_CAPABLE"
+        message: "This entity does not support direct policy inquiry processing"
+        transactionId: "123e4567-e89b-12d3-a456-426614174000"
+        capabilityStatus: "not_supported"
+        capabilityLevel: "none"
+        supportedAlternatives: ["clearinghouse_routing", "direct_carrier_access"]
+
+    ProducerError:
+      type: object
+      required:
+        - errorCode
+        - message
+      properties:
+        errorCode:
+          type: string
+          enum: [notAppointed, notLicensed, affiliationMismatch]
+          description: Specific producer error code identifying the type of error
+        message:
+          type: string
+          description: Human-readable error message
+        carrierName:
+          type: string
+          description: Name of carrier related to the error (when applicable)
+        jurisdiction:
+          type: string
+          description: State or jurisdiction related to licensing error (when applicable)
+      example:
+        errorCode: "notAppointed"
+        message: "Producer is not appointed with Pacific Life"
+        carrierName: "Pacific Life"
+
+    PolicyError:
+      type: object
+      required:
+        - errorCode
+        - message
+      properties:
+        errorCode:
+          type: string
+          enum: [ssnContractMismatch, proprietaryProduct, policyInactive, policyRestricted]
+          description: Specific error code identifying the type of error
+        message:
+          type: string
+          description: Human-readable error message
+        policyNumber:
+          type: string
+          description: Policy number related to the error (when applicable)
+        restrictionDetails:
+          type: object
+          description: Additional details about policy restrictions (when applicable)
+      example:
+        errorCode: "ssnContractMismatch"
+        message: "Client's SSN does not match the contract on file"
+        policyNumber: "ABC123456"
+
+    ErrorResponse:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          description: Error code
+          example: "VALIDATION_ERROR"
+        message:
+          type: string
+          description: Human-readable error message
+        transactionId:
+          type: string
+          format: uuid
+          description: Transaction identifier (when available)
+        errorDetails:
+          type: object
+          description: Additional error information
+        timestamp:
+          type: string
+          format: date-time
+          description: When the error occurred
+
+  # Implementation Notes:
+  #
+  # STYLE GUIDE DISCREPANCIES SUMMARY:
+  # 1. Response Body Structure: Current schemas wrap resources in named objects 
+  #    (e.g., policyInquiryRequest, policyInquiryResponse) rather than having 
+  #    the response body BE the resource directly
+  #
+  # 2. Boolean Field Naming: Fields like 'trailingCommission' and 'systematicInPlace'
+  #    should be prefixed with 'has' or 'is' per style guide
+  #
+  # 3. Field Naming Patterns: Uses 'firmName' instead of 'name' for business entities,
+  #    uses 'agentName' instead of producer-focused terminology
+  #
+  # 4. Policy Identifier Consistency: Uses 'policyNumber' (correct) but some legacy
+  #    schemas still reference 'policy-id' or 'policyId'
+  #
+  # UNIVERSAL ROUTING PATTERNS:
+  # - Policy-to-Entity Mapping: Partners can determine appropriate entity based on
+  #   policy number patterns, carrier databases, or business rules
+  # - Direct Communication: Any entity can call any other entity's endpoints directly
+  # - Flexible Fallback: NOT_CAPABLE responses allow graceful degradation to
+  #   alternative routing patterns
+  # - Transaction Consistency: Transaction IDs flow through all entities maintaining
+  #   end-to-end tracking regardless of routing path

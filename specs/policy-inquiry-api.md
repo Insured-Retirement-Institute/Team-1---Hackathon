@@ -1,4 +1,4 @@
-# Policy Inquiry API — Steps 1 & 2
+o# Policy Inquiry API — Steps 1 & 2
 
 ## Overview
 
