@@ -18,11 +18,18 @@ BP = Blueprint('insurance-carrier', __name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Carrier table mapping
+# Carrier table mapping by policy prefix
 CARRIER_TABLES = {
     "ATH": {"table": "carrier", "carrierName": "Athene"},
     "PAC": {"table": "carrier-2", "carrierName": "Pacific Life"},
     "PRU": {"table": "carrier-3", "carrierName": "Prudential"},
+}
+
+# Carrier-specific configurations for direct carrier endpoints
+CARRIER_CONFIGS = {
+    "athene": {"table": "carrier", "carrierName": "Athene", "prefix": "ATH"},
+    "paclife": {"table": "carrier-2", "carrierName": "Pacific Life", "prefix": "PAC"},
+    "prudential": {"table": "carrier-3", "carrierName": "Prudential", "prefix": "PRU"},
 }
 
 # Value mappings from carrier DB format to API spec format
@@ -70,6 +77,22 @@ def lookup_policy(policy_number: str) -> dict:
     if not table_name:
         return None
 
+    policy = get_item(
+        table_name,
+        f"POLICY#{policy_number}",
+        f"POLICY#{policy_number}"
+    )
+
+    if policy:
+        policy["_carrierName"] = carrier_name
+    return policy
+
+
+def lookup_policy_from_table(policy_number: str, table_name: str, carrier_name: str) -> dict:
+    """
+    Look up a policy from a specific carrier table.
+    Returns the policy record or None if not found.
+    """
     policy = get_item(
         table_name,
         f"POLICY#{policy_number}",
@@ -139,6 +162,167 @@ def health_check():
         "service": "insurance-carrier-api",
         "timestamp": datetime.utcnow().isoformat() + "Z"
     }), 200
+
+
+def _process_carrier_policy_inquiry(carrier_key: str):
+    """
+    Common policy inquiry logic for carrier-specific endpoints.
+    Looks up policies only from the specified carrier's table.
+    """
+    carrier_config = CARRIER_CONFIGS.get(carrier_key)
+    if not carrier_config:
+        return create_error_response(
+            "INVALID_CARRIER",
+            f"Unknown carrier: {carrier_key}",
+            400
+        )
+
+    table_name = carrier_config["table"]
+    carrier_name = carrier_config["carrierName"]
+    expected_prefix = carrier_config["prefix"]
+
+    transaction_id, error = validate_transaction_id(request.headers)
+    if error:
+        return error
+
+    try:
+        data = request.get_json()
+        if not data:
+            return create_error_response(
+                "INVALID_PAYLOAD",
+                "Request body is required",
+                400
+            )
+
+        if 'requestingFirm' not in data or 'client' not in data:
+            return create_error_response(
+                "VALIDATION_ERROR",
+                "requestingFirm and client are required fields",
+                400
+            )
+
+        requesting_firm = data.get('requestingFirm', {})
+        client = data.get('client', {})
+        servicing_agent = requesting_firm.get('servicingAgent', {})
+
+        logger.info(f"[{carrier_name}] Policy inquiry - Transaction ID: {transaction_id}")
+        logger.info(f"[{carrier_name}] Client: {client.get('clientName')}")
+        logger.info(f"[{carrier_name}] Policy Numbers: {client.get('policyNumbers', [])}")
+
+        client_ssn = client.get('ssn')
+        policy_numbers = client.get('policyNumbers', [])
+
+        producer_errors = validate_producer(
+            servicing_agent.get('agentName'),
+            servicing_agent.get('npn')
+        )
+
+        policies = []
+        client_name_from_db = None
+        ssn_last4 = client_ssn[-4:] if client_ssn and len(client_ssn) >= 4 else None
+
+        for policy_number in policy_numbers:
+            # Validate policy belongs to this carrier
+            if not policy_number.startswith(expected_prefix):
+                policies.append({
+                    "policyNumber": policy_number,
+                    "carrierName": carrier_name,
+                    "errors": [{
+                        "errorCode": "wrongCarrier",
+                        "message": f"Policy {policy_number} does not belong to {carrier_name}"
+                    }]
+                })
+                continue
+
+            policy = lookup_policy_from_table(policy_number, table_name, carrier_name)
+            if policy:
+                if not client_name_from_db:
+                    client_name_from_db = policy.get('clientName')
+                    if not ssn_last4 and policy.get('ownerSSN'):
+                        ssn_last4 = policy.get('ownerSSN')[-4:]
+
+                formatted_policy = format_policy_for_response(policy, client_ssn)
+                policies.append(formatted_policy)
+            else:
+                policies.append({
+                    "policyNumber": policy_number,
+                    "carrierName": carrier_name,
+                    "errors": [{
+                        "errorCode": "policyNotFound",
+                        "message": f"Policy {policy_number} not found in {carrier_name} records"
+                    }]
+                })
+
+        response_payload = {
+            "requestingFirm": {
+                "firmName": requesting_firm.get('firmName'),
+                "firmId": requesting_firm.get('firmId'),
+                "servicingAgent": {
+                    "agentName": servicing_agent.get('agentName'),
+                    "npn": servicing_agent.get('npn')
+                }
+            },
+            "producerValidation": {
+                "agentName": servicing_agent.get('agentName'),
+                "npn": servicing_agent.get('npn'),
+                "errors": producer_errors
+            },
+            "client": {
+                "clientName": client_name_from_db or client.get('clientName'),
+                "ssnLast4": ssn_last4,
+                "policies": policies
+            },
+            "enums": {
+                "accountType": ["individual", "joint", "trust", "custodial", "entity"],
+                "planType": ["nonQualified", "rothIra", "traditionalIra", "sep", "simple"]
+            }
+        }
+
+        logger.info(f"[{carrier_name}] Returning {len(policies)} policies for transaction {transaction_id}")
+
+        return create_response(
+            "IMMEDIATE",
+            f"Policy inquiry processed successfully by {carrier_name}",
+            transaction_id,
+            response_payload,
+            200,
+            processing_mode="immediate"
+        )
+
+    except Exception as e:
+        logger.error(f"[{carrier_name}] Error processing policy inquiry: {str(e)}")
+        return create_error_response(
+            "INTERNAL_ERROR",
+            "Internal server error occurred",
+            500
+        )
+
+
+@BP.route('/athene/policy-inquiry', methods=['POST'])
+def athene_policy_inquiry():
+    """
+    Athene-specific policy inquiry endpoint.
+    Looks up policies from the 'carrier' table (Athene policies with ATH- prefix).
+    """
+    return _process_carrier_policy_inquiry("athene")
+
+
+@BP.route('/paclife/policy-inquiry', methods=['POST'])
+def paclife_policy_inquiry():
+    """
+    Pacific Life-specific policy inquiry endpoint.
+    Looks up policies from the 'carrier-2' table (Pacific Life policies with PAC- prefix).
+    """
+    return _process_carrier_policy_inquiry("paclife")
+
+
+@BP.route('/prudential/policy-inquiry', methods=['POST'])
+def prudential_policy_inquiry():
+    """
+    Prudential-specific policy inquiry endpoint.
+    Looks up policies from the 'carrier-3' table (Prudential policies with PRU- prefix).
+    """
+    return _process_carrier_policy_inquiry("prudential")
 
 
 @BP.route('/policy-inquiry', methods=['POST'])

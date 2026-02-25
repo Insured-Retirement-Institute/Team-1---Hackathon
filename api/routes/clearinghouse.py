@@ -20,6 +20,35 @@ BP = Blueprint('clearinghouse', __name__)
 
 # Table names
 REQUEST_TRACKING_TABLE = os.environ.get("REQUEST_TRACKING_TABLE", "request-tracking")
+IIEX_TABLE = os.environ.get("IIEX_TABLE", "iiex")
+
+# Carrier name mapping by policy prefix (for IIEX lookups)
+CARRIER_NAME_BY_PREFIX = {
+    "ATH": "Athene",
+    "PAC": "Pacific Life",
+    "PRU": "Prudential",
+}
+
+# Value mappings for IIEX responses
+ACCOUNT_TYPE_MAP = {
+    "Fixed Annuity": "individual",
+    "Variable Annuity": "joint",
+    "Indexed Annuity": "trust",
+}
+
+PLAN_TYPE_MAP = {
+    "IRA": "traditionalIra",
+    "Roth IRA": "rothIra",
+    "Non-Qualified": "nonQualified",
+    "SEP IRA": "sep",
+    "SIMPLE IRA": "simple",
+}
+
+POLICY_STATUS_MAP = {
+    "Active": "active",
+    "Surrendered": "surrendered",
+    "Death Claim Pending": "death claim pending",
+}
 
 # Status constants
 STATUSES = [
@@ -162,6 +191,62 @@ def create_capability_response(
     return jsonify(response), 422
 
 
+def lookup_policy_from_iiex(policy_number: str) -> dict:
+    """
+    Look up a policy from the IIEX table.
+    Returns the policy record or None if not found.
+    """
+    policy = get_item(
+        IIEX_TABLE,
+        f"POLICY#{policy_number}",
+        f"POLICY#{policy_number}"
+    )
+
+    if policy:
+        # Determine carrier name from prefix
+        prefix = policy_number.split("-")[0] if "-" in policy_number else None
+        policy["_carrierName"] = CARRIER_NAME_BY_PREFIX.get(prefix, "Unknown")
+    return policy
+
+
+def format_iiex_policy_for_response(policy: dict, client_ssn: str = None) -> dict:
+    """
+    Format an IIEX DB policy record to PolicyInquiryResponse DetailedPolicyInfo format.
+    """
+    errors = []
+
+    # Check SSN match if provided
+    if client_ssn and policy.get("ownerSSN") != client_ssn:
+        errors.append({
+            "errorCode": "ssnContractMismatch",
+            "message": "Client's SSN does not match the contract on file"
+        })
+
+    # Check policy status
+    policy_status = policy.get("policyStatus", "Active")
+    if policy_status != "Active":
+        errors.append({
+            "errorCode": "policyInactive",
+            "message": f"Policy is {policy_status.lower()}"
+        })
+
+    return {
+        "policyNumber": policy.get("policyNumber"),
+        "carrierName": policy.get("_carrierName", "Unknown"),
+        "accountType": ACCOUNT_TYPE_MAP.get(policy.get("accountType"), "individual"),
+        "planType": PLAN_TYPE_MAP.get(policy.get("planType"), "nonQualified"),
+        "ownership": policy.get("ownership", "single"),
+        "productName": policy.get("productName"),
+        "cusip": policy.get("cusip"),
+        "trailingCommission": policy.get("trailingCommission", False),
+        "contractStatus": POLICY_STATUS_MAP.get(policy_status, "active"),
+        "withdrawalStructure": {
+            "systematicInPlace": False
+        },
+        "errors": errors
+    }
+
+
 @BP.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
@@ -170,6 +255,116 @@ def health_check():
         "service": "clearinghouse-api",
         "timestamp": datetime.utcnow().isoformat() + "Z"
     }), 200
+
+
+@BP.route('/dtcc/policy-inquiry', methods=['POST'])
+def dtcc_policy_inquiry():
+    """
+    DTCC/IIEX policy inquiry endpoint.
+    Looks up policies from the IIEX table which contains aggregated data
+    from multiple carriers (Athene, Pacific Life).
+
+    This is the clearinghouse's cached/aggregated view of policy data.
+    """
+    transaction_id, error = validate_transaction_id(request.headers)
+    if error:
+        return error
+
+    try:
+        data = request.get_json()
+        if not data:
+            return create_error_response(
+                "INVALID_PAYLOAD",
+                "Request body is required",
+                400
+            )
+
+        if 'requestingFirm' not in data or 'client' not in data:
+            return create_error_response(
+                "VALIDATION_ERROR",
+                "requestingFirm and client are required fields",
+                400
+            )
+
+        requesting_firm = data.get('requestingFirm', {})
+        client = data.get('client', {})
+        servicing_agent = requesting_firm.get('servicingAgent', {})
+
+        logger.info(f"[DTCC/IIEX] Policy inquiry - Transaction ID: {transaction_id}")
+        logger.info(f"[DTCC/IIEX] Client: {client.get('clientName')}")
+        logger.info(f"[DTCC/IIEX] Policy Numbers: {client.get('policyNumbers', [])}")
+
+        client_ssn = client.get('ssn')
+        policy_numbers = client.get('policyNumbers', [])
+
+        policies = []
+        client_name_from_db = None
+        ssn_last4 = client_ssn[-4:] if client_ssn and len(client_ssn) >= 4 else None
+
+        for policy_number in policy_numbers:
+            policy = lookup_policy_from_iiex(policy_number)
+            if policy:
+                if not client_name_from_db:
+                    client_name_from_db = policy.get('clientName')
+                    if not ssn_last4 and policy.get('ownerSSN'):
+                        ssn_last4 = policy.get('ownerSSN')[-4:]
+
+                formatted_policy = format_iiex_policy_for_response(policy, client_ssn)
+                policies.append(formatted_policy)
+            else:
+                # Policy not found in IIEX
+                policies.append({
+                    "policyNumber": policy_number,
+                    "carrierName": None,
+                    "errors": [{
+                        "errorCode": "policyNotFound",
+                        "message": f"Policy {policy_number} not found in IIEX records"
+                    }]
+                })
+
+        response_payload = {
+            "requestingFirm": {
+                "firmName": requesting_firm.get('firmName'),
+                "firmId": requesting_firm.get('firmId'),
+                "servicingAgent": {
+                    "agentName": servicing_agent.get('agentName'),
+                    "npn": servicing_agent.get('npn')
+                }
+            },
+            "producerValidation": {
+                "agentName": servicing_agent.get('agentName'),
+                "npn": servicing_agent.get('npn'),
+                "errors": []
+            },
+            "client": {
+                "clientName": client_name_from_db or client.get('clientName'),
+                "ssnLast4": ssn_last4,
+                "policies": policies
+            },
+            "enums": {
+                "accountType": ["individual", "joint", "trust", "custodial", "entity"],
+                "planType": ["nonQualified", "rothIra", "traditionalIra", "sep", "simple"]
+            }
+        }
+
+        logger.info(f"[DTCC/IIEX] Returning {len(policies)} policies for transaction {transaction_id}")
+
+        return create_response(
+            "IMMEDIATE",
+            "Policy inquiry processed successfully from IIEX cache",
+            transaction_id,
+            response_payload,
+            200,
+            processing_mode="cached"
+        )
+
+    except Exception as e:
+        logger.error(f"[DTCC/IIEX] Error processing policy inquiry: {str(e)}")
+        return create_error_response(
+            "INTERNAL_ERROR",
+            "Internal server error occurred",
+            500
+        )
 
 
 @BP.route('/policy-inquiry', methods=['POST'])
