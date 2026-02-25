@@ -10,13 +10,12 @@ import os
 import sys
 import logging
 import importlib
+# import awsgi
 import serverless_wsgi
 from dotenv import load_dotenv
 
-# Add lib/utils to path for dynamodb_utils imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'lib/utils'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'lib'))
-sys.path.insert(0, "../")
+# Add api folder to path for dynamodb_utils and helpers imports
+sys.path.insert(0, os.path.dirname(__file__))
 
 load_dotenv(override=False)
 from helpers import create_error_response, normalize_lambda_event
@@ -36,14 +35,14 @@ for filename in os.listdir(routes_dir):
         try:
             module = importlib.import_module(module_name)
             if hasattr(module, 'BP'):
-                # Use a convention for url_prefix, e.g., /api/<filename-with-hyphens>
-                url_prefix = f"/api/{filename[:-3].replace('_', '-')}"
+                # URL prefix with /v1/ base (e.g., insurance_carrier.py -> /v1/insurance-carrier)
+                url_prefix = f"/v1/{filename[:-3].replace('_', '-')}"
                 app.register_blueprint(module.BP, url_prefix=url_prefix)
         except Exception as e:
             print(f"Failed to import {module_name}: {e}")
 
 
-@app.route('/api/health', methods=['GET'])
+@app.route('/v1/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
     return jsonify({
@@ -83,7 +82,10 @@ def internal_error(e):
     )
 
 
-def lambda_handler(event, context):
+def handler(event, context):
+    # event = normalize_lambda_event(event)
+    # return serverless_wsgi.response(app, event, context)
+    # return awsgi.response(app, event, context)
     event = normalize_lambda_event(event)
     return serverless_wsgi.handle_request(app, event, context)
 

@@ -277,3 +277,48 @@ export interface ErrorResponse {
 	code: string
 	message: string
 }
+
+// PDF Extraction Request
+export interface PdfExtractionRequest {
+	requestId: string
+	pdfBase64: string
+}
+
+// Carrier Letter Request
+export interface CarrierAddress {
+	line1?: string
+	line2?: string
+	city?: string
+	state?: string
+	zip?: string
+}
+
+export interface CarrierLetterClient {
+	fullName: string
+	last4Ssn?: string
+}
+
+export interface CarrierLetterAgent {
+	name: string
+	npn?: string
+	firmName?: string
+	firmCrd?: string
+}
+
+export interface CarrierLetterRequest {
+	requestId: string
+	carrierName: string
+	carrierDepartment?: string
+	carrierAddress?: CarrierAddress
+	client: CarrierLetterClient
+	policyNumbers: string[]
+	currentAgent: CarrierLetterAgent
+	newAgent: CarrierLetterAgent
+	reasonForChange: string
+	trailingCommission: 'yes' | 'no'
+	effectiveDateRequested?: string
+	requestingFirm: {
+		firmName: string
+		firmId?: string
+	}
+}

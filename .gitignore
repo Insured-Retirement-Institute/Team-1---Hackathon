@@ -403,3 +403,5 @@ FodyWeavers.xsd
 
 packages/
 build/
+lambda_package.zip
+package/

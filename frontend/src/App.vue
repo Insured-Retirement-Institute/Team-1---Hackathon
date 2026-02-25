@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router';
 import AppLoader from '@/components/AppLoader.vue';
 import type { RouteMeta } from '@/router';
 import NavBar from './components/NavBar.vue';
+import { useEventSource } from './utils/useEventSource';
 
 const route = useRoute()
 const router = useRouter()
@@ -14,6 +15,8 @@ async function handleNavigation(meta: RouteMeta) {
 	}
 	router.push(meta.route)
 }
+
+useEventSource().initialize()
 
 </script>
 

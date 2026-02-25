@@ -1,87 +1,30 @@
-# .\scripts\package-lambda.ps1 -FunctionName api
+# Package Lambda function with dependencies in the same layer
+# .\scripts\package-lambda.ps1
 
 param(
-    [string]$FunctionName = "api-broker-dealer",
-    [string]$OutputDir = ".\build",
-    [switch]$Clean
+    [string]$ApiFolder = "./api",
+    [string]$OutputPath = "./build"
 )
 
-$ErrorActionPreference = "Stop"
+# Create output directory
+if (Test-Path $OutputPath) {
+    Remove-Item $OutputPath -Recurse -Force
+}
+New-Item -ItemType Directory -Path $OutputPath | Out-Null
 
-# Resolve paths
-$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$projectRoot = Split-Path -Parent $scriptDir
-$functionDir = Join-Path $projectRoot $FunctionName
-$buildDir = Join-Path $projectRoot $OutputDir
-$zipFile = Join-Path $buildDir "$FunctionName.zip"
+# Copy API code
+Copy-Item -Path $ApiFolder -Destination $OutputPath -Recurse
 
-# Cleanup if requested
-if ($Clean -and (Test-Path $buildDir)) {
-    Write-Host "Cleaning build directory..." -ForegroundColor Yellow
-    Remove-Item $buildDir -Recurse -Force
+# Copy packages to the same layer
+$sitePackagesPath = "./packages"
+
+if (Test-Path $sitePackagesPath) {
+    Copy-Item -Path "$sitePackagesPath/*" -Destination "$OutputPath/api" -Recurse
 }
 
-# Create build directory
-if (-not (Test-Path $buildDir)) {
-    Write-Host "Creating build directory..." -ForegroundColor Cyan
-    New-Item -ItemType Directory -Path $buildDir | Out-Null
-}
+# Create zip file for Lambda deployment
+$zipName = "api-package-$(Get-Date -Format 'yyyyMMdd-HHmmss').zip"
+Compress-Archive -Path $OutputPath -DestinationPath $zipName -Force
 
-# Create lambda package directory
-$lambdaPackage = Join-Path $buildDir "lambda-package"
-if (Test-Path $lambdaPackage) {
-    Remove-Item $lambdaPackage -Recurse -Force
-}
-New-Item -ItemType Directory -Path $lambdaPackage | Out-Null
-
-Write-Host " "
-Write-Host "Packaging $FunctionName Lambda function..." -ForegroundColor Green
-
-# Copy app.py
-Write-Host "Copying application files..."
-Copy-Item -Path "$functionDir\app.py" -Destination $lambdaPackage -Force
-
-# Copy lambdas folder
-Write-Host "Copying lib folder..."
-$lambdasSource = Join-Path $projectRoot "lib"
-$lambdasDest = Join-Path $lambdaPackage "lib"
-if (Test-Path $lambdasSource) {
-    Copy-Item -Path $lambdasSource -Destination $lambdasDest -Recurse -Force
-}
-
-# Install dependencies from function directory
-Write-Host "Installing dependencies..."
-$requirementsFile = Join-Path $functionDir "requirements.txt"
-if (Test-Path $requirementsFile) {
-    & pip install --target $lambdaPackage --requirement $requirementsFile -q
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "Error installing dependencies" -ForegroundColor Red
-        exit 1
-    }
-}
-
-# Create zip file
-Write-Host "Creating zip file..."
-if (Test-Path $zipFile) {
-    Remove-Item $zipFile -Force
-}
-
-# Use built-in compression
-Add-Type -AssemblyName System.IO.Compression.FileSystem
-
-$compressionLevel = [System.IO.Compression.CompressionLevel]::Optimal
-[System.IO.Compression.ZipFile]::CreateFromDirectory($lambdaPackage, $zipFile, $compressionLevel, $false)
-
-# Get zip file size
-$zipSize = (Get-Item $zipFile).Length / 1MB
-Write-Host " "
-Write-Host "Lambda package created successfully" -ForegroundColor Green
-Write-Host "  Location: $zipFile" -ForegroundColor Cyan
-Write-Host ("  Size: " + [Math]::Round($zipSize, 2) + " MB") -ForegroundColor Cyan
-
-# Cleanup package directory
-Remove-Item $lambdaPackage -Recurse -Force
-
-Write-Host " "
-Write-Host "Ready to deploy with:" -ForegroundColor Green
-Write-Host ("  .\scripts\deploy-lambda.ps1 -FunctionName " + $FunctionName) -ForegroundColor Cyan
+Write-Host "Package created: $zipName"
+Write-Host "Ready for Lambda deployment"

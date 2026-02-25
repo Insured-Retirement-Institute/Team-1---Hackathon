@@ -6,7 +6,7 @@ param(
 
     [string]$Region = "us-east-1",
     [string]$RuntimeVersion = "python3.12",
-    [string]$Handler = "app.lambda_handler",
+    [string]$Handler = "app.handler",
     [string]$Role = "arn:aws:iam::762233730742:role/lambda-execution-role",
     [string]$Description = "Lambda function"
 )

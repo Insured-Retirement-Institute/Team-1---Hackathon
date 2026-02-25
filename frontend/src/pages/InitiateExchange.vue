@@ -4,9 +4,17 @@ import BarcodeIcon from '@/icons/BarcodeIcon.svg'
 import UserIcon from '@/icons/UserIcon.svg'
 import ProfileCardIcon from '@/icons/ProfileCardIcon.svg'
 import CloseIcon from '@/icons/CloseIcon.svg'
+import UploadIcon from '@/icons/UploadIcon.svg'
 import CirclePlusIcon from '@/icons/CirclePlusIcon.svg'
 import { useContractResultsStore } from '@/stores/useContractResultsStore';
 import { storeToRefs } from 'pinia';
+import { useFileDialog } from '@vueuse/core';
+import { useLoaderStore } from '@/stores/useLoaderStore';
+import { brokerDealerApi } from '@/api/Api';
+import { monotonicFactory } from 'ulid';
+import { fileToBase64 } from '@/utils/fileUtils';
+
+const ulid = monotonicFactory()
 
 const contractResultsStore = useContractResultsStore()
 
@@ -15,12 +23,49 @@ const { searchContracts, clientSearch } = storeToRefs(contractResultsStore)
 if (searchContracts.value.length === 0) {
 	contractResultsStore.addSearchContract()
 }
+
+const { open, onChange } = useFileDialog({
+	accept: 'application/pdf',
+	multiple: false
+})
+
+onChange(async files => {
+	if (!files || files.length === 0) return
+
+	const file = files[0]
+	if (!file) return
+
+	const loader = useLoaderStore()
+	loader.open('Processing Document')
+
+	try {
+		const pdfBase64 = await fileToBase64(file)
+
+		const response = await brokerDealerApi.extractPolicyFromPdf({
+			requestId: ulid(),
+			pdfBase64
+		})
+
+		console.log('PDF extraction response:', response)
+	} catch (error) {
+		console.error('PDF extraction failed:', error)
+	} finally {
+		loader.close()
+	}
+})
 </script>
 
 <template>
 	<div class="w-full">
-
 		<div class="p-10 bg-[#f8f8f8] rounded-xl mb-4">
+			<div class="flex items-center justify-end">
+				<FwbButton class="cursor-pointer" @click="open">
+					<div class="flex items-center gap-2">
+						<UploadIcon />
+						I have existing contract documents
+					</div>
+				</FwbButton>
+			</div>
 			<div class="flex flex-wrap *:p-4 items-center">
 				<div class="w-1/3">
 					<FwbInput v-model="clientSearch.firstName" label="First Name">
@@ -57,8 +102,6 @@ if (searchContracts.value.length === 0) {
 						</template>
 					</FwbInput>
 				</div>
-
-
 			</div>
 
 			<div class="p-4">

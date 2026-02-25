@@ -4,6 +4,7 @@ import { AccountType, ContractStatus, OwnershipType, PlanType, type ContractReco
 import { useLoaderStore } from '@/stores/useLoaderStore'
 import { brokerDealerApi, insuranceCarrierApi } from '@/api/Api'
 import { isClientResponse, type DetailedPolicyInfo, type PolicyInquiryRequest } from '@/models/ClearinghouseApi'
+import { useEventSource } from '@/utils/useEventSource'
 
 const CARRIER_PRODUCTS: Record<string, string> = {
 	'Allianz Life': 'Allianz 222® Annuity',
@@ -119,6 +120,12 @@ function generateFakeDtccResult(searchContract: ContractRecord, index: number): 
 
 	// Determine contract status based on index
 	let contractStatus: ContractStatus
+	let ownership : OwnershipType
+	if (index === 2) {
+		ownership = OwnershipType.Custodial
+	} else {
+		ownership = randomEnumValue(OwnershipType)
+	}
 	if (index === 3) {
 		contractStatus = ContractStatus.Unappointed
 	} else if (index === 4) {
@@ -136,7 +143,7 @@ function generateFakeDtccResult(searchContract: ContractRecord, index: number): 
 			productName,
 			contractNumber: searchContract.contractNumber,
 			cusipNumber: generateCusipNumber(),
-			ownership: randomEnumValue(OwnershipType),
+			ownership,
 			trailing: Math.random() > 0.5,
 			withdrawalProgram: Math.random() > 0.5,
 			contractStatus,
@@ -223,8 +230,12 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 		}
 	}
 
-	function addSearchContract() {
-		searchContracts.value.push(createEmptyContract())
+	function addSearchContract(options: Partial<ContractRecord> = {}) {
+		const contract = createEmptyContract()
+		searchContracts.value.push({
+			...contract,
+			...options
+		})
 	}
 
 	function removeSearchContract(id: string | number) {
@@ -243,8 +254,6 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 		await new Promise(resolve => setTimeout(resolve, 2000))
 
 		try {
-			// Try API call
-			const transactionId = crypto.randomUUID()
 			const request: PolicyInquiryRequest = {
 				requestingFirm: {
 					firmName: 'Demo Firm',
@@ -261,7 +270,7 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 				}
 			}
 
-			const response = await brokerDealerApi.submitPolicyInquiryRequest(transactionId, request)
+			const response = await brokerDealerApi.submitPolicyInquiryRequest(request)
 
 
 			if (isClientResponse(response.payload?.client) && response.payload?.client.policies && response.payload.client.policies.length > 0) {
@@ -299,8 +308,7 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 
 		try {
 			// Try API call
-			const transactionId = crypto.randomUUID()
-			const response = await insuranceCarrierApi.validatePolicies(transactionId, {
+			const response = await insuranceCarrierApi.validatePolicies({
 				policies: policyNumbers
 			})
 

@@ -1,8 +1,23 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { FwbInput, FwbSelect, FwbCheckbox } from 'flowbite-vue'
 import { PlanType, AccountType, OwnershipType, type ContractRecord } from '@/models/ContractRecord'
+import CustodialInfoCard from '@/components/CustodialInfoCard.vue'
 
 const record = defineModel<ContractRecord>({ required: true })
+
+withDefaults(defineProps<{
+	displayContractData?: boolean
+}>(), {
+	displayContractData: true
+})
+
+// Initialize custodialInfo if not present
+if (!record.value.custodialInfo) {
+	record.value.custodialInfo = {}
+}
+
+const isCustodial = computed(() => record.value.ownership === OwnershipType.Custodial)
 
 const planTypeOptions = [
 	{ value: PlanType.NonQualified, name: PlanType.NonQualified },
@@ -33,22 +48,19 @@ const ownershipOptions = [
 
 <template>
 	<div
-		class="bg-[#f8f8f8] rounded-xl p-6 mb-4"
+		class="bg-white rounded-xl p-6 mb-4"
 		:class="{ 'outline-blue-600 outline-2': record.selected }"
 	>
 		<div class="flex items-center justify-between mb-4">
 			<div class="flex items-center gap-2">
 				<FwbCheckbox v-model="record.selected" />
 
-				<div>
-					<p class="text-lg font-bold">No electronic record found</p>
-					<p>Enter the following details to proceed</p>
-				</div>
+				<p class="text-gray-900 text-lg font-bold">Contract {{ record.contractNumber }}</p>
 			</div>
-			<p class="text-gray-900 text-sm font-bold">Contract #{{ record.contractNumber }}</p>
 		</div>
 
-		<div class="grid grid-cols-3 gap-4">
+		<!-- Contract Data Section -->
+		<div v-if="displayContractData" class="grid grid-cols-3 gap-4">
 			<FwbInput v-model="record.carrierName" label="Carrier Name" />
 			<FwbInput v-model="record.productName" label="Product Name" />
 			<FwbInput v-model="record.contractNumber" label="Contract Number" />
@@ -57,6 +69,11 @@ const ownershipOptions = [
 			<FwbSelect v-model="record.accountType" :options="accountTypeOptions" label="Account Type" />
 			<FwbSelect v-model="record.ownership" :options="ownershipOptions" label="Ownership" />
 			<FwbInput v-model="record.ownerName" label="Owner Name" />
+		</div>
+
+		<!-- Custodial Data Section -->
+		<div v-if="isCustodial" :class="{ 'mt-6': displayContractData }">
+			<CustodialInfoCard v-model="record.custodialInfo!" />
 		</div>
 	</div>
 </template>
