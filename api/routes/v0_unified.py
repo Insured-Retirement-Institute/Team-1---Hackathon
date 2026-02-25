@@ -40,6 +40,10 @@ logger = logging.getLogger(__name__)
 # Where to POST async results. Set via env var; blank = log only (no callback).
 CALLBACK_BASE_URL = os.environ.get("CALLBACK_BASE_URL", "")
 
+# In-memory store for received servicing agent change responses.
+# Keyed by requestId. Production would use DynamoDB.
+_change_responses = {}
+
 # ── Blueprints ──────────────────────────────────────────────────────────────
 
 servicing_agent_changes_bp = Blueprint("v0-servicing-agent-changes", __name__)
@@ -291,7 +295,8 @@ def reply_servicing_agent_change():
     POST /v0/servicing-agent-changes/reply
 
     Receive a servicing agent change response (from carrier async processing
-    or forwarded by clearinghouse). Returns AcknowledgmentResponse.
+    or forwarded by clearinghouse). Stores the response and returns
+    AcknowledgmentResponse.
     """
     request_id, err = validate_request_id(request.headers)
     if err:
@@ -302,12 +307,51 @@ def reply_servicing_agent_change():
     if not data:
         return error_response("VALIDATION_ERROR", "Request body is required", request_id)
 
-    logger.info("v0 servicing agent change reply received — requestId=%s", request_id)
+    # Store the response keyed by requestId
+    resp_request_id = data.get("requestId", request_id)
+    _change_responses[resp_request_id] = {
+        "receivedAt": datetime.utcnow().isoformat() + "Z",
+        "requestId": resp_request_id,
+        "response": data,
+    }
+
+    logger.info(
+        "v0 servicing agent change reply stored — requestId=%s (total stored: %d)",
+        resp_request_id,
+        len(_change_responses),
+    )
     return acknowledgment_response(
         request_id,
         "Servicing agent change response received successfully",
         correlation_id,
     )
+
+
+@servicing_agent_changes_bp.route("/reply", methods=["GET"])
+def list_change_responses():
+    """
+    GET /v0/servicing-agent-changes/reply
+
+    List all received servicing agent change responses.
+    """
+    return ok_response(list(_change_responses.values()))
+
+
+@servicing_agent_changes_bp.route("/reply/<request_id>", methods=["GET"])
+def get_change_response(request_id):
+    """
+    GET /v0/servicing-agent-changes/reply/<requestId>
+
+    Retrieve a specific servicing agent change response by requestId.
+    """
+    record = _change_responses.get(request_id)
+    if not record:
+        return error_response(
+            "NOT_FOUND",
+            f"No response found for requestId: {request_id}",
+            status=404,
+        )
+    return ok_response(record)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
