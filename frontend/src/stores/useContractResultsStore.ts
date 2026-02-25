@@ -2,7 +2,7 @@ import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import { AccountType, ContractStatus, OwnershipType, PlanType, type ContractRecord } from '@/models/ContractRecord'
 import { useLoaderStore } from '@/stores/useLoaderStore'
-import { brokerDealerApi, insuranceCarrierApi } from '@/api/ClearinghouseApi'
+import { brokerDealerApi, insuranceCarrierApi } from '@/api/Api'
 import { isClientResponse, type DetailedPolicyInfo, type PolicyInquiryRequest } from '@/models/ClearinghouseApi'
 
 const CARRIER_PRODUCTS: Record<string, string> = {

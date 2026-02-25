@@ -12,7 +12,12 @@ import logging
 import importlib
 import serverless_wsgi
 from dotenv import load_dotenv
+
+# Add lib/utils to path for dynamodb_utils imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'lib/utils'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'lib'))
 sys.path.insert(0, "../")
+
 load_dotenv(override=False)
 from helpers import create_error_response, normalize_lambda_event
 

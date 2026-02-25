@@ -61,6 +61,13 @@ const router = createRouter({
 		{
 			path: '/carrier-admin/:carrier',
 			component: () => import('@/pages/carrier/CarrierAdmin.vue')
+		},
+		{
+			path: '/api-health',
+			component: () => import('@/pages/ApiHealth.vue'),
+			meta: {
+				title: 'API Health'
+			}
 		}
 	],
 })
