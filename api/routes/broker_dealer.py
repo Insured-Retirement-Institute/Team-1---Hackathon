@@ -5,11 +5,19 @@ Integrated with DynamoDB distributor tables.
 """
 
 from flask import request, jsonify, Blueprint
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 import sys
 import uuid
+import base64
+import json
+import io
+import os
 import logging
 from dotenv import load_dotenv
+import boto3
+from fpdf import FPDF
+from strands import Agent, tool
+from strands.models import BedrockModel
 load_dotenv(override=False)
 sys.path.insert(0, "../")
 sys.path.insert(0, "../../")
@@ -19,6 +27,7 @@ from helpers import (create_response,
 from lib.utils.dynamodb_utils import get_item, put_item, update_item, scan_items, Attr
 
 BP = Blueprint('broker-dealer', __name__)
+URL_PREFIX = "/v1/broker-dealer"
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -493,6 +502,792 @@ def transfer_notification():
             "Internal server error occurred",
             500
         )
+
+
+# ── PDF Policy Statement Extractor ─────────────────────────────────────────────
+# Uses Claude via Bedrock converse() with a native document block.
+# No text-extraction library needed — Claude reads the PDF layout directly.
+
+_PDF_MODEL_ID = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+_PDF_REGION   = "us-east-1"
+
+_PDF_SYSTEM_PROMPT = """You are a document data extraction specialist for annuity policy statements.
+
+Your job: read the provided policy statement PDF and extract every relevant field into a
+policyInquiryResponse JSON object. Return ONLY the JSON — no markdown, no code fences,
+no explanation, no prose before or after.
+
+───────────────────────────────────────────────────────────────────────────────
+FIELD EXTRACTION GUIDE
+───────────────────────────────────────────────────────────────────────────────
+
+requestingFirm
+  firmName  → The BROKER-DEALER or financial advisory FIRM that submitted this application
+              (e.g. "Strategic Wealth Advisors", "Premier Financial Services").
+              This is NOT the insurance carrier. Look for labels like "Broker-Dealer",
+              "Selling Firm", "Advisor Firm", "Receiving Firm", "BD Firm", or the
+              firm associated with the servicing agent's employer.
+  firmId    → The BD firm's identifier (DTCC ID, CRD, or internal firm ID shown on the
+              document). null if not present.
+  servicingAgent
+    agentName → Full name of the financial adviser / agent of record / servicing agent
+    npn       → Agent's National Producer Number (NPN). null if not shown.
+
+producerValidation
+  agentName → Same as requestingFirm.servicingAgent.agentName
+  npn       → Same as requestingFirm.servicingAgent.npn
+  errors    → Always []
+
+client
+  clientName  → For INDIVIDUAL accounts: the policy owner's full legal name.
+                For TRUST accounts: the full trust name (e.g. "Foster Family Irrevocable Trust"),
+                NOT the trustee's personal name.
+                For BUSINESS/ENTITY accounts: the entity name.
+  ssnLast4    → Last 4 digits of SSN. For trusts, use the trustee/representative's SSN last 4.
+                For businesses, use the Tax ID last 4. null if not shown at all.
+  policies    → Array — one entry per policy/contract found in the document.
+
+For each policy found:
+  policyNumber      → Contract or policy number exactly as printed
+  carrierName       → Full name of the INSURANCE CARRIER that issued the annuity
+                      (e.g. "Crestview Insurance", "Athene Annuity"). This is NOT the BD firm.
+  accountType       → Map registration type to exactly one of:
+                        individual | joint | trust | custodial | entity
+                      (default "individual" if unclear)
+  planType          → Map tax qualification to exactly one of:
+                        nonQualified | rothIra | traditionalIra | sep | simple
+                      (default "nonQualified" if unclear or not shown)
+  ownership         → "single" | "joint" | "trust" | "other" — null if not shown
+  productName       → Full annuity product name exactly as printed
+  cusip             → 9-character CUSIP identifier. Search the ENTIRE document carefully —
+                      it may appear in a product details section, header, or footer.
+                      Return the value if found; null only if genuinely absent after
+                      thorough review.
+  trailingCommission → false unless the document explicitly states trailing commission applies
+  contractStatus    → Map to exactly one of:
+                        active          — policy is in force / issued / current
+                        pending         — application submitted, not yet issued
+                        surrendered     — contract has been surrendered
+                        death claim pending — death claim in process
+                      Use "pending" if the document shows status "Pending", "Application",
+                      "Not Yet Issued", or similar pre-issuance language.
+  withdrawalStructure
+    systematicInPlace → true only if document explicitly shows a systematic withdrawal
+                        plan is currently active; false otherwise
+  errors            → [] (empty — no validation errors at extraction time)
+
+enums (always include these fixed values):
+  accountType: ["individual", "joint", "trust", "custodial", "entity"]
+  planType:    ["nonQualified", "rothIra", "traditionalIra", "sep", "simple"]
+
+───────────────────────────────────────────────────────────────────────────────
+OUTPUT STRUCTURE — return exactly this shape, nothing else:
+───────────────────────────────────────────────────────────────────────────────
+{
+  "policyInquiryResponse": {
+    "requestingFirm": {
+      "firmName": "...",
+      "firmId": null,
+      "servicingAgent": { "agentName": "...", "npn": "..." }
+    },
+    "producerValidation": {
+      "agentName": "...",
+      "npn": "...",
+      "errors": []
+    },
+    "client": {
+      "clientName": "...",
+      "ssnLast4": "...",
+      "policies": [
+        {
+          "policyNumber": "...",
+          "carrierName": "...",
+          "accountType": "individual",
+          "planType": "nonQualified",
+          "ownership": "single",
+          "productName": "...",
+          "cusip": null,
+          "trailingCommission": false,
+          "contractStatus": "active",
+          "withdrawalStructure": { "systematicInPlace": false },
+          "errors": []
+        }
+      ]
+    },
+    "enums": {
+      "accountType": ["individual", "joint", "trust", "custodial", "entity"],
+      "planType": ["nonQualified", "rothIra", "traditionalIra", "sep", "simple"]
+    }
+  }
+}
+"""
+
+
+def _strip_pdf_fences(text: str) -> str:
+    """Strip markdown code fences the model occasionally wraps around JSON."""
+    text = text.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    return text
+
+
+def _extract_from_pdf(pdf_base64: str, request_id: str) -> dict:
+    """
+    Decode a Base64-encoded policy statement PDF and extract structured data via Bedrock.
+
+    Passes the PDF as a native document block to Claude — no text extraction library needed.
+    Returns the parsed policyInquiryResponse dict.
+    Raises ValueError on bad base64, json.JSONDecodeError on non-JSON model output.
+    """
+    try:
+        pdf_bytes = base64.b64decode(pdf_base64, validate=False)
+    except Exception as e:
+        raise ValueError(f"Invalid base64 encoding: {e}") from e
+
+    logger.info("Sending PDF to Bedrock — request_id=%s size=%d bytes", request_id, len(pdf_bytes))
+
+    client = boto3.client("bedrock-runtime", region_name=_PDF_REGION)
+    response = client.converse(
+        modelId=_PDF_MODEL_ID,
+        system=[{"text": _PDF_SYSTEM_PROMPT}],
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "document": {
+                        "format": "pdf",
+                        "name": "policy_statement",
+                        "source": {"bytes": pdf_bytes},
+                    }
+                },
+                {
+                    "text": (
+                        f"Extract all policy information from this statement. "
+                        f"Request ID: {request_id}. "
+                        "Return ONLY the JSON object — no other text."
+                    )
+                },
+            ],
+        }],
+    )
+
+    raw = response["output"]["message"]["content"][0]["text"]
+    logger.info("Bedrock extraction complete — request_id=%s", request_id)
+    return json.loads(_strip_pdf_fences(raw))
+
+
+@BP.route('/extract-policy-from-pdf', methods=['POST'])
+def extract_policy_from_pdf():
+    """
+    Extract structured policy data from a Base64-encoded carrier policy statement PDF.
+
+    Passes the PDF natively to Claude via Bedrock converse() and returns a
+    policyInquiryResponse matching the Step 2 BD Change process format.
+    Each form may vary in the data it provides — all present fields are extracted,
+    absent fields are returned as null.
+
+    Required header:
+      transactionId: <UUID>
+
+    Required body fields:
+      requestId   string   Caller-supplied request identifier
+      pdfBase64   string   Base64-encoded bytes of the policy statement PDF
+
+    Response codes:
+      EXTRACTED        — extraction succeeded; policyInquiryResponse in payload
+      INVALID_PDF      — base64 could not be decoded
+      EXTRACTION_ERROR — Bedrock call or JSON parse failure
+    """
+    transaction_id, error = validate_transaction_id(request.headers)
+    if error:
+        return error
+
+    data = request.get_json(silent=True)
+    if not data:
+        return create_error_response("INVALID_PAYLOAD", "JSON request body is required", 400)
+
+    missing = [f for f in ("requestId", "pdfBase64") if not data.get(f)]
+    if missing:
+        return create_error_response(
+            "VALIDATION_ERROR",
+            f"Missing required fields: {', '.join(missing)}",
+            400,
+        )
+
+    request_id = data["requestId"]
+    logger.info("PDF extraction — transactionId=%s requestId=%s", transaction_id, request_id)
+
+    try:
+        result = _extract_from_pdf(data["pdfBase64"], request_id)
+    except ValueError as e:
+        logger.error("PDF decode error — requestId=%s: %s", request_id, e)
+        return create_error_response("INVALID_PDF", str(e), 400)
+    except json.JSONDecodeError as e:
+        logger.error("Non-JSON model response — requestId=%s: %s", request_id, e)
+        return create_error_response(
+            "EXTRACTION_ERROR",
+            "Model returned non-JSON output. Verify the PDF is a readable policy statement.",
+            500,
+        )
+    except Exception as e:
+        logger.error("Extraction failed — requestId=%s: %s", request_id, e, exc_info=True)
+        return create_error_response("EXTRACTION_ERROR", str(e), 500)
+
+    policies = (
+        (result.get("policyInquiryResponse") or {})
+        .get("client", {})
+        .get("policies", [])
+    )
+    logger.info("Extraction successful — requestId=%s policies=%d", request_id, len(policies))
+
+    return create_response(
+        "EXTRACTED",
+        "Policy data extracted from document",
+        transaction_id,
+        result,
+        200,
+        processing_mode="immediate",
+    )
+
+
+# ── Carrier Letter Agent ────────────────────────────────────────────────────────
+# Off-DTCC scenario: DTCC returned "no contracts found" — BD must send a formal
+# servicing-agent change letter directly to the carrier.
+#
+# Uses a Strands Agent (Claude via Bedrock) for carrier lookup, template selection,
+# and letter composition. PDF is rendered in-memory via fpdf2 and then passed back
+# to Claude as a native document block for quality control before returning.
+
+_CARRIER_DIR_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "carrier_directory.json")
+_LETTER_MODEL_ID  = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+_LETTER_REGION    = "us-east-1"
+
+
+def _load_carrier_directory() -> list[dict]:
+    """Load and return the list of carriers from the bundled directory JSON."""
+    try:
+        with open(_CARRIER_DIR_PATH) as f:
+            return json.load(f)["carriers"]
+    except Exception:
+        return []
+
+
+def _letter_to_pdf_base64(letter_text: str) -> str:
+    """Render letter_text to a PDF and return it as a Base64 string."""
+
+    def _is_separator(s: str) -> bool:
+        return len(s) >= 8 and len(set(s)) == 1 and s[0] in "-=_*"
+
+    def _ascii_safe(s: str) -> str:
+        return (
+            s.replace("\u2500", "-").replace("\u2502", "|")
+             .replace("\u2014", "--").replace("\u2013", "-")
+             .replace("\u2022", "*").replace("\u2019", "'")
+             .replace("\u2018", "'").replace("\u201c", '"')
+             .replace("\u201d", '"').replace("\u2026", "...")
+        )
+
+    pdf = FPDF()
+    pdf.set_margins(left=25, top=25, right=25)
+    pdf.add_page()
+
+    # Header band
+    pdf.set_fill_color(30, 60, 114)
+    pdf.rect(0, 0, 210, 12, "F")
+    pdf.set_font("Helvetica", "B", size=9)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_xy(25, 3)
+    pdf.cell(0, 6, "SERVICING AGENT CHANGE REQUEST  |  CONFIDENTIAL", ln=True)
+
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_y(20)
+
+    for line in letter_text.split("\n"):
+        stripped = _ascii_safe(line.rstrip())
+        if stripped == "":
+            pdf.ln(4)
+        elif _is_separator(stripped):
+            if stripped[0] == "=":
+                pdf.set_draw_color(30, 60, 114)
+                pdf.set_line_width(0.5)
+            else:
+                pdf.set_draw_color(180, 180, 180)
+                pdf.set_line_width(0.3)
+            y = pdf.get_y()
+            pdf.line(25, y, 185, y)
+            pdf.ln(2)
+        else:
+            pdf.set_x(pdf.l_margin)
+            if stripped.startswith(("Re:", "Dear")):
+                pdf.set_font("Helvetica", "B", size=10)
+            elif stripped.isupper() and len(stripped) > 8:
+                pdf.set_font("Helvetica", "B", size=9)
+                pdf.set_text_color(30, 60, 114)
+            elif stripped.startswith("_____"):
+                pdf.set_font("Helvetica", size=10)
+                pdf.set_text_color(0, 0, 0)
+            else:
+                pdf.set_font("Helvetica", size=9)
+                pdf.set_text_color(0, 0, 0)
+            pdf.multi_cell(0, 5, stripped)
+            pdf.set_text_color(0, 0, 0)
+
+    # Footer
+    pdf.set_y(-18)
+    pdf.set_draw_color(30, 60, 114)
+    pdf.set_line_width(0.3)
+    pdf.line(25, pdf.get_y(), 185, pdf.get_y())
+    pdf.ln(2)
+    pdf.set_font("Helvetica", "I", size=7)
+    pdf.set_text_color(120, 120, 120)
+    pdf.cell(0, 4, "Generated by BD Change Process Agent  |  For authorized use only", align="C")
+
+    pdf_bytes = pdf.output()
+    return base64.b64encode(pdf_bytes).decode("utf-8")
+
+
+def _qc_letter_pdf(pdf_base64: str) -> dict:
+    """
+    Pass the rendered PDF back to Claude as a native document block for quality
+    control. Checks that all required sections are present and well-formed.
+    Returns {"passed": bool, "notes": str}.
+    """
+    try:
+        pdf_bytes = base64.b64decode(pdf_base64)
+        client = boto3.client("bedrock-runtime", region_name=_LETTER_REGION)
+        response = client.converse(
+            modelId=_LETTER_MODEL_ID,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "document": {
+                            "format": "pdf",
+                            "name": "carrier_letter",
+                            "source": {"bytes": pdf_bytes},
+                        }
+                    },
+                    {
+                        "text": (
+                            "Review this servicing agent change letter for completeness and quality. "
+                            "Verify all required sections are present: carrier name and mailing address, "
+                            "client name and SSN last 4, policy number(s), current servicing agent name "
+                            "and NPN, new servicing agent name and NPN, broker-dealer name and DTCC ID, "
+                            "trailing commission statement, reason for change, and requesting firm "
+                            "signature block with contact information. "
+                            "Reply with exactly 'QC_PASS' if the letter is complete and well-formed, "
+                            "or 'QC_ISSUES: <brief list of problems>' if anything is missing or incorrect."
+                        )
+                    },
+                ],
+            }],
+        )
+        qc_text = response["output"]["message"]["content"][0]["text"].strip()
+        return {"passed": qc_text.startswith("QC_PASS"), "notes": qc_text}
+    except Exception as exc:
+        logger.warning("PDF QC step failed (non-fatal): %s", exc)
+        return {"passed": True, "notes": "QC step skipped due to internal error"}
+
+
+_LETTER_AGENT_SYSTEM_PROMPT = """You are a BD Operations specialist generating a formal off-DTCC
+servicing agent change letter. All required information is provided in the initial message.
+Do not ask any questions — process the full request in one pass.
+
+YOUR PROCESS:
+1. Call lookup_carrier with the carrier name to get the official mailing address, department,
+   and submission requirements from the directory.
+   - If the carrier is not found, use the address supplied in the message (if provided).
+2. Call generate_change_letter with all the details from the message and the address from step 1.
+3. Confirm the letter was generated. Do not reproduce the full letter text in your response."""
+
+
+def _build_carrier_letter_agent():
+    """
+    Create a one-shot Strands carrier letter agent with its own result store.
+    Returns (agent, captured) where captured["letter_text"] is populated by the
+    generate_change_letter tool when the agent calls it.
+
+    A fresh agent + captured dict is created per request so there is no
+    shared mutable state between concurrent calls.
+    """
+    captured = {"letter_text": None}
+    carriers = _load_carrier_directory()
+
+    @tool
+    def lookup_carrier(carrier_name: str) -> dict:
+        """
+        Look up a carrier in the directory by name or common alias.
+        Returns the full carrier record including mailing address, servicing department,
+        fax, and submission requirements. Returns suggestions on partial match.
+        """
+        name_lower = carrier_name.lower().strip()
+        for c in carriers:
+            if c["carrier_name"].lower() == name_lower:
+                return c
+            if any(alias.lower() == name_lower for alias in c.get("aliases", [])):
+                return c
+        matches = []
+        for c in carriers:
+            candidates = [c["carrier_name"]] + c.get("aliases", [])
+            if any(name_lower in x.lower() or x.lower() in name_lower for x in candidates):
+                matches.append({"carrier_name": c["carrier_name"], "aliases": c.get("aliases", [])})
+        if matches:
+            return {"found": False, "message": f"No exact match for '{carrier_name}'.", "suggestions": matches}
+        return {"found": False, "message": f"Carrier '{carrier_name}' not in directory.",
+                "known_carriers": [c["carrier_name"] for c in carriers]}
+
+    @tool
+    def generate_change_letter(
+        carrier_name: str,
+        carrier_department: str,
+        carrier_address_line1: str,
+        carrier_address_line2: str,
+        carrier_city: str,
+        carrier_state: str,
+        carrier_zip: str,
+        client_name: str,
+        client_ssn_last4: str,
+        policy_numbers: str,
+        current_agent_name: str,
+        current_agent_npn: str,
+        new_agent_name: str,
+        new_agent_npn: str,
+        new_bd_name: str,
+        new_bd_dtcc_id: str,
+        reason_for_change: str,
+        requesting_firm_name: str,
+        requesting_firm_contact: str,
+        requesting_firm_phone: str,
+        trailing_commission: str,
+        effective_date_requested: str = "",
+    ) -> dict:
+        """
+        Generate the text of a formal servicing agent change letter addressed to the
+        carrier. policy_numbers should be a comma-separated string. Returns a compact
+        confirmation — the full letter is captured internally and rendered to PDF.
+        """
+        today = date.today().strftime("%B %d, %Y")
+        policy_list = [p.strip() for p in policy_numbers.split(",")]
+
+        addr_lines = [carrier_address_line1]
+        if carrier_address_line2:
+            addr_lines.append(carrier_address_line2)
+        addr_lines.append(f"{carrier_city}, {carrier_state} {carrier_zip}")
+        carrier_address_block = "\n".join(addr_lines)
+
+        policy_ref = ", ".join(policy_list) if len(policy_list) <= 3 else (
+            ", ".join(policy_list[:3]) + f", and {len(policy_list) - 3} additional"
+        )
+        eff_line = (
+            f"Requested Effective Date:  {effective_date_requested}"
+            if effective_date_requested
+            else "Requested Effective Date:  As soon as administratively possible"
+        )
+        tc_map = {
+            "yes":     "The new servicing agent WILL receive trailing commissions on this contract.",
+            "no":      "The new servicing agent will NOT receive trailing commissions on this contract.",
+            "unknown": "Please apply your standard trailing commission arrangement for the new servicing agent.",
+        }
+        tc_line = tc_map.get(trailing_commission.lower(), tc_map["unknown"])
+        SEP = "-" * 72
+
+        letter = f"""{requesting_firm_name}
+{"=" * len(requesting_firm_name)}
+Contact: {requesting_firm_contact}
+Phone:   {requesting_firm_phone}
+Date:    {today}
+
+
+{carrier_name}
+{carrier_department}
+{carrier_address_block}
+
+
+Re:   Request for Servicing Agent / Broker of Record Change
+      Policy Number(s): {policy_ref}
+      Policyholder:     {client_name} (SSN last 4: {client_ssn_last4})
+
+
+Dear {carrier_department},
+
+We are writing on behalf of {new_bd_name} (DTCC Firm ID: {new_bd_dtcc_id}) to formally
+request a change of servicing agent for the above-referenced annuity contract(s).
+This request is made with the full knowledge and authorization of the policy owner.
+
+Please note: A policy inquiry was submitted through DTCC and returned no contracts
+found, indicating these contracts are not currently accessible via the DTCC platform.
+We are therefore submitting this request directly to your company.
+
+{SEP}
+  CONTRACT INFORMATION
+{SEP}
+  Policyholder:           {client_name}
+  SSN (last 4 digits):    {client_ssn_last4}
+  Policy Number(s):       {", ".join(policy_list)}
+
+{SEP}
+  CURRENT SERVICING AGENT (TO BE REMOVED)
+{SEP}
+  Agent Name:             {current_agent_name}
+  National Producer No.:  {current_agent_npn}
+
+{SEP}
+  NEW SERVICING AGENT (TO BE ASSIGNED)
+{SEP}
+  Agent Name:             {new_agent_name}
+  National Producer No.:  {new_agent_npn}
+  Broker/Dealer:          {new_bd_name}
+  DTCC Firm ID:           {new_bd_dtcc_id}
+  {eff_line}
+
+{SEP}
+  TRAILING COMMISSION
+{SEP}
+  {tc_line}
+
+{SEP}
+  REASON FOR CHANGE
+{SEP}
+  {reason_for_change}
+
+We represent that the incoming servicing agent, {new_agent_name} (NPN: {new_agent_npn}),
+holds all required licenses in the applicable jurisdiction(s) and has an active
+appointment with {carrier_name}. Supporting documentation is enclosed if required.
+
+Please process this servicing agent change at your earliest convenience and
+confirm completion in writing to the contact listed above.
+
+If you have any questions or require additional documentation, please do not
+hesitate to contact us.
+
+Sincerely,
+
+
+_________________________________________
+{requesting_firm_contact}
+Authorized Representative, {requesting_firm_name}
+
+
+Enclosures (as applicable):
+  * Copy of policy owner authorization / client signature
+  * Incoming producer's state insurance license(s)
+  * Carrier appointment confirmation for {new_agent_name}
+  * DTCC "no contracts found" response (if available)
+"""
+        captured["letter_text"] = letter
+        return {
+            "generated": True,
+            "carrier": carrier_name,
+            "client": client_name,
+            "policy_count": len(policy_list),
+            "letter_length_chars": len(letter),
+        }
+
+    model = BedrockModel(model_id=_LETTER_MODEL_ID, region_name=_LETTER_REGION)
+    agent = Agent(
+        model=model,
+        tools=[lookup_carrier, generate_change_letter],
+        system_prompt=_LETTER_AGENT_SYSTEM_PROMPT,
+    )
+    return agent, captured
+
+
+@BP.route('/generate-carrier-letter', methods=['POST'])
+def generate_carrier_letter():
+    """
+    Generate a formal off-DTCC servicing agent change letter addressed to the carrier.
+
+    Used when a DTCC Policy Inquiry returned 'no contracts found' and the broker-dealer
+    must contact the carrier directly. Generates both the letter text and a PDF.
+
+    The carrier directory is consulted to fill in the mailing address and surface any
+    carrier-specific requirements (proprietary form required, notarization, etc.).
+
+    Required header:
+      transactionId: <UUID>
+
+    Required body fields (see schemas/carrier_letter_request.schema.json):
+      requestId           string   Caller-supplied identifier
+      carrierName         string   Carrier name or alias (directory lookup performed)
+      client.name         string   Full name of the policy owner
+      client.ssnLast4     string   Last 4 digits of SSN
+      policyNumbers       array    List of policy/contract numbers
+      currentAgent        object   name + npn of agent being replaced
+      newAgent            object   name, npn, bdName, bdDtccId of incoming agent
+      reasonForChange     string   Plain-language reason
+      trailingCommission  string   "yes" | "no" | "unknown"
+      requestingFirm      object   name, contact, phone of the submitting BD
+
+    Optional:
+      carrierDepartment          string   Overrides directory default
+      carrierAddress             object   Full address — required if carrier not in directory
+      effectiveDateRequested     string   YYYY-MM-DD; omit for 'as soon as possible'
+
+    Response codes:
+      GENERATED           — letter and PDF produced successfully
+      CARRIER_OWN_FORM    — carrier requires its own proprietary form; letter not generated
+      VALIDATION_ERROR    — missing required fields or carrier address unresolvable
+    """
+    transaction_id, error = validate_transaction_id(request.headers)
+    if error:
+        return error
+
+    data = request.get_json(silent=True)
+    if not data:
+        return create_error_response("INVALID_PAYLOAD", "JSON request body is required", 400)
+
+    required = ["requestId", "carrierName", "client", "policyNumbers",
+                "currentAgent", "newAgent", "reasonForChange",
+                "trailingCommission", "requestingFirm"]
+    missing = [f for f in required if not data.get(f)]
+    if missing:
+        return create_error_response(
+            "VALIDATION_ERROR", f"Missing required fields: {', '.join(missing)}", 400
+        )
+
+    request_id = data["requestId"]
+    carrier_name_req = data["carrierName"]
+    logger.info("Carrier letter generation — transactionId=%s requestId=%s carrier=%s",
+                transaction_id, request_id, carrier_name_req)
+
+    # Pre-flight: check if carrier requires a proprietary form (fast directory lookup, no AI).
+    # This avoids burning an LLM call for carriers like Nationwide that can never use a generic letter.
+    carriers = _load_carrier_directory()
+    carrier_record = next(
+        (c for c in carriers
+         if carrier_name_req.lower() in
+         [c["carrier_name"].lower()] + [a.lower() for a in c.get("aliases", [])]),
+        None,
+    )
+    requirements = carrier_record.get("requirements", {}) if carrier_record else {}
+    if requirements.get("use_own_form"):
+        form_name = requirements.get("own_form_name", "the carrier's proprietary form")
+        logger.info("Carrier requires own form — requestId=%s carrier=%s", request_id, carrier_name_req)
+        return create_response(
+            "CARRIER_OWN_FORM",
+            f"{carrier_name_req} requires the use of {form_name}. "
+            "A generic letter cannot be generated for this carrier. "
+            "Please obtain the carrier's proprietary form.",
+            transaction_id,
+            {
+                "carrierName": carrier_record["carrier_name"],
+                "ownFormName": form_name,
+                "notes": requirements.get("notes", ""),
+                "portalUrl": carrier_record.get("correspondence", {}).get("portal_url"),
+            },
+            200,
+        )
+
+    # If carrier is not in directory and no address override was supplied, fail fast.
+    if not carrier_record and not data.get("carrierAddress"):
+        return create_error_response(
+            "VALIDATION_ERROR",
+            f"Carrier '{carrier_name_req}' not found in directory and no carrierAddress provided.",
+            400,
+        )
+
+    # Build the address-override note so the agent can use it if needed.
+    addr_note = ""
+    if data.get("carrierAddress"):
+        addr = data["carrierAddress"]
+        parts = [addr["line1"]]
+        if addr.get("line2"):
+            parts.append(addr["line2"])
+        parts.append(f"{addr['city']}, {addr['state']} {addr['zip']}")
+        addr_note = "ADDRESS OVERRIDE (use if carrier not in directory): " + ", ".join(parts)
+
+    dept_note = data.get("carrierDepartment", "")
+
+    new_agent = data["newAgent"]
+    current_agent = data["currentAgent"]
+    client = data["client"]
+    firm = data["requestingFirm"]
+
+    initial_message = (
+        f"Generate a servicing agent change letter with the following details.\n\n"
+        f"CARRIER: {carrier_name_req}\n"
+        f"DEPARTMENT OVERRIDE: {dept_note} (blank = use directory default)\n"
+        f"{addr_note}\n\n"
+        f"CLIENT: {client['name']} (SSN last 4: {client['ssnLast4']})\n"
+        f"POLICY NUMBERS: {', '.join(data['policyNumbers'])}\n\n"
+        f"CURRENT SERVICING AGENT (being replaced):\n"
+        f"  Name: {current_agent['name']}\n"
+        f"  NPN:  {current_agent['npn']}\n\n"
+        f"NEW SERVICING AGENT (incoming):\n"
+        f"  Name:     {new_agent['name']}\n"
+        f"  NPN:      {new_agent['npn']}\n"
+        f"  BD Name:  {new_agent['bdName']}\n"
+        f"  DTCC ID:  {new_agent['bdDtccId']}\n\n"
+        f"REASON FOR CHANGE: {data['reasonForChange']}\n"
+        f"TRAILING COMMISSION: {data['trailingCommission']}\n"
+        f"EFFECTIVE DATE: {data.get('effectiveDateRequested', '')} "
+        f"(blank = as soon as administratively possible)\n\n"
+        f"REQUESTING FIRM:\n"
+        f"  Name:    {firm['name']}\n"
+        f"  Contact: {firm['contact']}\n"
+        f"  Phone:   {firm['phone']}\n"
+    )
+
+    # Run the Strands agent — it calls lookup_carrier then generate_change_letter.
+    try:
+        agent, captured = _build_carrier_letter_agent()
+        agent(initial_message)
+    except Exception as e:
+        logger.error("Agent invocation failed — requestId=%s: %s", request_id, e, exc_info=True)
+        return create_error_response("GENERATION_ERROR", f"Agent error: {e}", 500)
+
+    letter_text = captured.get("letter_text")
+    if not letter_text:
+        logger.error("Agent completed but generate_change_letter was never called — requestId=%s", request_id)
+        return create_error_response("GENERATION_ERROR", "Agent did not produce letter text.", 500)
+
+    # Render PDF in-memory.
+    try:
+        pdf_base64 = _letter_to_pdf_base64(letter_text)
+    except Exception as e:
+        logger.error("PDF rendering failed — requestId=%s: %s", request_id, e, exc_info=True)
+        return create_error_response("GENERATION_ERROR", f"PDF rendering failed: {e}", 500)
+
+    # QC pass — Claude reviews the rendered PDF as a native document block.
+    qc = _qc_letter_pdf(pdf_base64)
+    logger.info("Letter QC — requestId=%s passed=%s notes=%s",
+                request_id, qc["passed"], qc["notes"][:80])
+
+    logger.info("Carrier letter generated — requestId=%s carrier=%s policies=%d qc_passed=%s",
+                request_id, carrier_name_req, len(data["policyNumbers"]), qc["passed"])
+
+    payload = {
+        "letterText": letter_text,
+        "pdfBase64": pdf_base64,
+        "qcReview": qc,
+        "metadata": {
+            "carrier": carrier_record["carrier_name"] if carrier_record else carrier_name_req,
+            "client": client["name"],
+            "policyNumbers": data["policyNumbers"],
+            "newAgent": new_agent["name"],
+            "generatedDate": date.today().isoformat(),
+            "carrierRequirements": {
+                "wetSignatureRequired": requirements.get("wet_signature_required", True),
+                "notarizationRequired": requirements.get("notarization_required", False),
+                "medallionRequired": requirements.get("medallion_required", False),
+                "notes": requirements.get("notes", ""),
+                "processingTimeDays": carrier_record.get("processing_time_days") if carrier_record else None,
+            } if requirements else {},
+        },
+    }
+
+    return create_response(
+        "GENERATED",
+        f"Carrier letter generated for {carrier_name_req}",
+        transaction_id,
+        payload,
+        200,
+        processing_mode="immediate",
+    )
 
 
 @BP.route('/bd-change-callback', methods=['POST'])
