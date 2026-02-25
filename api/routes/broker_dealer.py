@@ -507,6 +507,153 @@ def transfer_notification():
         )
 
 
+# ── SQS Trigger Routes ──────────────────────────────────────────────────────────
+# UI-facing endpoints that enqueue async work onto SQS queues.
+# The actual API calls are handled by standalone SQS-triggered Lambdas.
+
+_SQS_REGION = os.environ.get("SQS_REGION", "us-east-1")
+
+
+@BP.route('/trigger-policy-inquiry', methods=['POST'])
+def trigger_policy_inquiry():
+    """
+    Trigger a policy inquiry request via SQS.
+
+    Called by the UI (button click) to initiate a policy info fetch from
+    DTCC/IIEX.  Enqueues an SQS message; the sqs-policy-inquiry Lambda
+    handles the actual API call, DB update, and EventBridge notification.
+
+    Required header:  transactionId (UUID)
+    Required body:    requestingFirm, client  (per PolicyInquiryRequest schema)
+    Returns:          202 with code=QUEUED
+    """
+    transaction_id, error = validate_transaction_id(request.headers)
+    if error:
+        return error
+
+    data = request.get_json(silent=True)
+    if not data:
+        return create_error_response("INVALID_PAYLOAD", "JSON request body is required", 400)
+
+    missing = [f for f in ("requestingFirm", "client") if f not in data]
+    if missing:
+        return create_error_response(
+            "VALIDATION_ERROR",
+            f"Missing required fields: {', '.join(missing)}",
+            400,
+        )
+
+    queue_url = os.environ.get("POLICY_INQUIRY_SQS_URL")
+    if not queue_url:
+        return create_error_response(
+            "CONFIGURATION_ERROR",
+            "Policy inquiry queue not configured",
+            500,
+        )
+
+    message = {
+        "transactionId": transaction_id,
+        "action": "POLICY_INQUIRY",
+        "requestData": data,
+        "timestamp": get_timestamp(),
+    }
+
+    try:
+        sqs = boto3.client("sqs", region_name=_SQS_REGION)
+        sqs.send_message(
+            QueueUrl=queue_url,
+            MessageBody=json.dumps(message),
+            MessageAttributes={
+                "action": {"StringValue": "POLICY_INQUIRY", "DataType": "String"},
+            },
+        )
+    except Exception as e:
+        logger.error("Failed to enqueue policy inquiry — transactionId=%s: %s", transaction_id, e)
+        return create_error_response("QUEUE_ERROR", "Failed to enqueue policy inquiry request", 500)
+
+    logger.info("Policy inquiry enqueued — transactionId=%s", transaction_id)
+    return create_response(
+        "QUEUED",
+        "Policy inquiry request queued for processing",
+        transaction_id,
+        status_code=202,
+        processing_mode="deferred",
+        estimated_response_time="PT30S",
+    )
+
+
+@BP.route('/trigger-transfer-request', methods=['POST'])
+def trigger_transfer_request():
+    """
+    Trigger a BD change / transfer request via SQS.
+
+    Called by the UI (button click) to initiate a broker-dealer change.
+    Enqueues an SQS message; the sqs-bd-change Lambda handles the actual
+    /bd-change API call, DB update, and EventBridge notification.
+    The async carrier/IIEX response arrives later via the
+    api-bd-change-callback Lambda endpoint.
+
+    Required header:  transactionId (UUID)
+    Required body:    receivingBrokerId, deliveringBrokerId, carrierId,
+                      policyNumber  (per BdChangeRequest schema)
+    Returns:          202 with code=QUEUED
+    """
+    transaction_id, error = validate_transaction_id(request.headers)
+    if error:
+        return error
+
+    data = request.get_json(silent=True)
+    if not data:
+        return create_error_response("INVALID_PAYLOAD", "JSON request body is required", 400)
+
+    required = ["receivingBrokerId", "deliveringBrokerId", "carrierId", "policyNumber"]
+    missing = [f for f in required if not data.get(f)]
+    if missing:
+        return create_error_response(
+            "VALIDATION_ERROR",
+            f"Missing required fields: {', '.join(missing)}",
+            400,
+        )
+
+    queue_url = os.environ.get("BD_CHANGE_SQS_URL")
+    if not queue_url:
+        return create_error_response(
+            "CONFIGURATION_ERROR",
+            "BD change queue not configured",
+            500,
+        )
+
+    message = {
+        "transactionId": transaction_id,
+        "action": "BD_CHANGE",
+        "requestData": data,
+        "timestamp": get_timestamp(),
+    }
+
+    try:
+        sqs = boto3.client("sqs", region_name=_SQS_REGION)
+        sqs.send_message(
+            QueueUrl=queue_url,
+            MessageBody=json.dumps(message),
+            MessageAttributes={
+                "action": {"StringValue": "BD_CHANGE", "DataType": "String"},
+            },
+        )
+    except Exception as e:
+        logger.error("Failed to enqueue BD change — transactionId=%s: %s", transaction_id, e)
+        return create_error_response("QUEUE_ERROR", "Failed to enqueue transfer request", 500)
+
+    logger.info("BD change enqueued — transactionId=%s", transaction_id)
+    return create_response(
+        "QUEUED",
+        "Transfer request queued for processing",
+        transaction_id,
+        status_code=202,
+        processing_mode="deferred",
+        estimated_response_time="PT5M",
+    )
+
+
 # ── PDF Policy Statement Extractor ─────────────────────────────────────────────
 # Uses Claude via Bedrock converse() with a native document block.
 # No text-extraction library needed — Claude reads the PDF layout directly.
