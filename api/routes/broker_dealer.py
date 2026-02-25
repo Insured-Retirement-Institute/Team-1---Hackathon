@@ -842,7 +842,7 @@ def extract_policy_from_pdf():
     absent fields are returned as null.
 
     Required header:
-      transactionId: <UUID>
+      requestId: <ULID>
 
     Required body fields:
       requestId   string   Caller-supplied request identifier
@@ -853,9 +853,11 @@ def extract_policy_from_pdf():
       INVALID_PDF      — base64 could not be decoded
       EXTRACTION_ERROR — Bedrock call or JSON parse failure
     """
-    transaction_id, error = validate_transaction_id(request.headers)
-    if error:
-        return error
+    # Accept requestId header (per unified spec) with transactionId fallback
+    request_id_header = request.headers.get("requestId") or request.headers.get("transactionId")
+    if not request_id_header:
+        return create_error_response("MISSING_HEADER", "requestId header is required", 400)
+    transaction_id = request_id_header
 
     data = request.get_json(silent=True)
     if not data:
@@ -1144,7 +1146,7 @@ def generate_carrier_letter():
     carrier-specific requirements (proprietary form required, notarization, etc.).
 
     Required header:
-      transactionId: <UUID>
+      requestId: <ULID>
 
     Required body fields (see schemas/carrier_letter_request.schema.json):
       requestId           string   Caller-supplied identifier
@@ -1168,9 +1170,11 @@ def generate_carrier_letter():
       CARRIER_OWN_FORM    — carrier requires its own proprietary form; letter not generated
       VALIDATION_ERROR    — missing required fields or carrier address unresolvable
     """
-    transaction_id, error = validate_transaction_id(request.headers)
-    if error:
-        return error
+    # Accept requestId header (per unified spec) with transactionId fallback
+    request_id_header = request.headers.get("requestId") or request.headers.get("transactionId")
+    if not request_id_header:
+        return create_error_response("MISSING_HEADER", "requestId header is required", 400)
+    transaction_id = request_id_header
 
     data = request.get_json(silent=True)
     if not data:
