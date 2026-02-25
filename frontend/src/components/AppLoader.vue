@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useLoaderStore } from '@/stores/useLoaderStore'
-import logoImage from '@/assets/logo.png'
+import logoImage from '@/assets/logo-eye.png'
 
 const loaderStore = useLoaderStore()
 </script>
@@ -16,7 +16,7 @@ const loaderStore = useLoaderStore()
 					<img
 						:src="logoImage"
 						alt="Loading"
-						class="w-24 h-24 object-contain animate-pulse-bounce"
+						class="w-48 h-48 object-contain animate-pulse-bounce"
 					/>
 					<span class="sr-only">Loading...</span>
 				</div>
