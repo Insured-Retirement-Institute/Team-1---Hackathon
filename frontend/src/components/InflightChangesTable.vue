@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import SortIcon from '@/icons/SortIcon.svg'
 import type { InflightChange } from '@/models/InflightChange'
 import type { Client } from '@/models/Client'
-import { FwbDropdown, FwbListGroup, FwbListGroupItem, FwbProgress } from 'flowbite-vue'
+import { FwbBadge, FwbDropdown, FwbListGroup, FwbListGroupItem, FwbProgress } from 'flowbite-vue'
 
 type SortableColumn = 'clientName' | keyof InflightChange
 type SortDirection = 'asc' | 'desc'
@@ -79,12 +79,6 @@ function formatDate(dateString: string): string {
 		day: 'numeric'
 	})
 }
-
-function getProgressColor(percentage: number): 'green' | 'yellow' | 'red' {
-	if (percentage >= 75) return 'green'
-	if (percentage >= 50) return 'yellow'
-	return 'red'
-}
 </script>
 
 <template>
@@ -149,15 +143,22 @@ function getProgressColor(percentage: number): 'green' | 'yellow' | 'red' {
 							{{ change.contractNumber }}
 						</td>
 						<td class="px-6 py-4">
-							<div class="flex items-center gap-2">
-								<FwbProgress
-									:progress="change.completionPercentage"
-									:color="getProgressColor(change.completionPercentage)"
-									size="sm"
-									class="w-24"
-								/>
-								<span class="text-xs">{{ change.completionPercentage }}%</span>
-							</div>
+							<FwbBadge color="green" v-if="change.completionPercentage === 100">Complete</FwbBadge>
+							<template v-else>
+								<div class="flex justify-between text-xs">
+									<p>0%</p>
+									<p>100%</p>
+								</div>
+								<div>
+									<FwbProgress
+										:progress="change.completionPercentage"
+										outer-classes="bg-gray-200 rounded-full"
+										inner-classes="rounded-full bg-gradient-to-r from-[#1696f6] to-[#f33405]"
+										class="w-full"
+										size="md"
+									/>
+								</div>
+							</template>
 						</td>
 						<td class="px-6 py-4">
 							{{ formatDate(change.lastUpdatedDate) }}

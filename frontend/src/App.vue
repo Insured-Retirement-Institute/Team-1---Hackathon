@@ -3,7 +3,6 @@ import { FwbButton, FwbHeading } from 'flowbite-vue';
 import { useRoute, useRouter } from 'vue-router';
 import AppLoader from '@/components/AppLoader.vue';
 import type { RouteMeta } from '@/router';
-import { awsTest } from './api/Api';
 import NavBar from './components/NavBar.vue';
 
 const route = useRoute()
@@ -16,7 +15,6 @@ async function handleNavigation(meta: RouteMeta) {
 	router.push(meta.route)
 }
 
-awsTest()
 </script>
 
 <template>
