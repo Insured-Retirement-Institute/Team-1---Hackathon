@@ -1,30 +1,76 @@
 """
 Distributor API Lambda Handler
-Single-table DynamoDB design for agent/client/contract/transaction management.
+Single-table DynamoDB design for agent/client/contract/request management.
 
 Routes:
-  GET  /agent/{npn}                    - Get agent profile
-  GET  /agent/{npn}/clients            - Get all clients for agent
-  POST /agent/{npn}/clients            - Create new client for agent
-  GET  /agent/{npn}/transactions       - Get all transactions for agent
-  POST /agent/{npn}/transactions       - Create new transaction
-  GET  /client/{clientId}              - Get client profile
-  GET  /client/{clientId}/contracts    - Get all contracts for client
+  GET  /agent/{npn}                                    - Get agent profile
+  GET  /agent/{npn}/clients                            - Get all clients for agent
+  POST /agent/{npn}/clients                            - Create new client for agent
+  GET  /agent/{npn}/requests                           - Get all requests for agent
+  POST /agent/{npn}/requests                           - Create new request
+  GET  /client/{clientId}                              - Get client profile
+  GET  /client/{clientId}/contracts                    - Get all contracts for client
+  POST /trigger-policy-inquiry                         - Enqueue policy inquiry via SQS
+  POST /trigger-transfer-request                       - Enqueue servicing agent change via SQS
+
+Environment variables (SQS triggers):
+  POLICY_INQUIRY_SQS_URL   SQS queue URL for policy inquiry
+  BD_CHANGE_SQS_URL        SQS queue URL for servicing agent change request
 """
 
 import json
-import boto3
+import os
+import time
 import uuid
 from datetime import datetime, timezone
+
+import boto3
 from boto3.dynamodb.conditions import Key
+
+_ULID_ENCODING = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+
+
+def _generate_ulid() -> str:
+    """Generate a ULID — no external dependencies required."""
+    t = int(time.time() * 1000)
+    r = int.from_bytes(os.urandom(10), "big")
+    chars = []
+    for _ in range(16):
+        chars.append(_ULID_ENCODING[r & 0x1F])
+        r >>= 5
+    for _ in range(10):
+        chars.append(_ULID_ENCODING[t & 0x1F])
+        t >>= 5
+    return "".join(reversed(chars))
+
 
 # Initialize DynamoDB
 dynamodb = boto3.resource('dynamodb')
 TABLE_NAME = 'distributor'
 
+SQS_REGION = os.environ.get('SQS_REGION', 'us-east-1')
+
+
+def _generate_ulid() -> str:
+    """Generate a ULID — no external dependencies required."""
+    t = int(time.time() * 1000)
+    r = int.from_bytes(os.urandom(10), "big")
+    chars = []
+    for _ in range(16):
+        chars.append(_ULID_ENCODING[r & 0x1F])
+        r >>= 5
+    for _ in range(10):
+        chars.append(_ULID_ENCODING[t & 0x1F])
+        t >>= 5
+    return "".join(reversed(chars))
+
 
 def get_table():
     return dynamodb.Table(TABLE_NAME)
+
+
+def _now():
+    return datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
 
 def response(status_code, body):
@@ -35,7 +81,7 @@ def response(status_code, body):
             'Content-Type': 'application/json',
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-            'Access-Control-Allow-Headers': '*',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With, Accept',
             'Access-Control-Max-Age': '86400'
         },
         'body': json.dumps(body, default=str)
@@ -79,7 +125,7 @@ def create_client(npn, body):
 
     # Generate client ID
     client_id = str(uuid.uuid4())[:8].upper()
-    now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    now = _now()
 
     # Create client profile
     client_profile = {
@@ -110,14 +156,14 @@ def create_client(npn, body):
     return response(201, {'message': 'Client created', 'client': client_profile})
 
 
-def get_agent_transactions(npn):
-    """Get all transactions for an agent."""
+def get_agent_requests(npn):
+    """Get all requests for an agent."""
     table = get_table()
     result = table.query(
-        KeyConditionExpression=Key('pk').eq(f'AGENT#{npn}') & Key('sk').begins_with('TRANSACTION#')
+        KeyConditionExpression=Key('pk').eq(f'AGENT#{npn}') & Key('sk').begins_with('REQUEST#')
     )
-    transactions = result.get('Items', [])
-    return response(200, {'transactions': transactions, 'count': len(transactions)})
+    requests = result.get('Items', [])
+    return response(200, {'requests': requests, 'count': len(requests)})
 
 
 def get_client(client_id):
@@ -140,8 +186,8 @@ def get_client_contracts(client_id):
     return response(200, {'contracts': contracts, 'count': len(contracts)})
 
 
-def create_transaction(npn, body):
-    """Create a new transaction for an agent."""
+def create_request(npn, body):
+    """Create a new request for an agent."""
     table = get_table()
 
     # Validate required fields
@@ -165,19 +211,19 @@ def create_transaction(npn, body):
 
     client = client_link['Item']
 
-    # Create transaction
-    tx_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    # Create request with ULID per spec v0.1.1
+    req_id = _generate_ulid()
+    now = _now()
 
-    transaction = {
+    request_item = {
         'pk': f'AGENT#{npn}',
-        'sk': f'TRANSACTION#{tx_id}',
-        'type': 'Transaction',
-        'transactionId': tx_id,
+        'sk': f'REQUEST#{req_id}',
+        'type': 'Request',
+        'requestId': req_id,
         'clientId': client_id,
         'clientName': client.get('clientName'),
         'contracts': body['contracts'],
-        'transactionType': body.get('transactionType', 'BD_CHANGE'),
+        'requestType': body.get('requestType', 'BD_CHANGE'),
         'status': 'MANIFEST_REQUESTED',
         'receivingBrokerId': body['receivingBrokerId'],
         'deliveringBrokerId': agent.get('firmId'),
@@ -185,9 +231,104 @@ def create_transaction(npn, body):
         'updatedAt': now
     }
 
-    table.put_item(Item=transaction)
+    table.put_item(Item=request_item)
 
-    return response(201, {'message': 'Transaction created', 'transaction': transaction})
+    return response(201, {'message': 'Request created', 'request': request_item})
+
+
+def trigger_policy_inquiry(body, request_id):
+    """
+    POST /trigger-policy-inquiry
+    Enqueue a policy inquiry request onto SQS.
+    The sqs-policy-inquiry Lambda handles the actual API call,
+    DynamoDB update, and EventBridge notification.
+
+    Required header: requestId (ULID)
+    Required body:   requestingFirm, client  (per PolicyInquiryRequest schema)
+    """
+    queue_url = os.environ.get('POLICY_INQUIRY_SQS_URL')
+    if not queue_url:
+        return response(500, {'error': 'Policy inquiry queue not configured'})
+
+    missing = [f for f in ('requestingFirm', 'client') if f not in body]
+    if missing:
+        return response(400, {'error': f'Missing required fields: {", ".join(missing)}'})
+
+    message = {
+        'requestId': request_id,
+        'action': 'POLICY_INQUIRY',
+        'requestData': body,
+        'timestamp': _now(),
+    }
+
+    try:
+        sqs = boto3.client('sqs', region_name=SQS_REGION)
+        sqs.send_message(
+            QueueUrl=queue_url,
+            MessageBody=json.dumps(message),
+            MessageAttributes={
+                'action': {'StringValue': 'POLICY_INQUIRY', 'DataType': 'String'},
+            },
+        )
+    except Exception as exc:
+        return response(500, {'error': f'Failed to enqueue policy inquiry: {str(exc)}'})
+
+    return response(202, {
+        'code': 'QUEUED',
+        'message': 'Policy inquiry request queued for processing',
+        'requestId': request_id,
+        'processingMode': 'deferred',
+        'estimatedResponseTime': 'PT30S',
+    })
+
+
+def trigger_transfer_request(body, request_id):
+    """
+    POST /trigger-transfer-request
+    Enqueue a servicing agent change request onto SQS.
+    The sqs-bd-change Lambda handles the actual API call,
+    DynamoDB update, and EventBridge notification.
+    The async carrier response arrives via api-bd-change-callback.
+
+    Required header: requestId (ULID)
+    Required body:   requestingFirm, carrier, client
+                     (per ServicingAgentChangeRequest schema v0.1.1)
+    """
+    queue_url = os.environ.get('BD_CHANGE_SQS_URL')
+    if not queue_url:
+        return response(500, {'error': 'BD change queue not configured'})
+
+    required = ['requestingFirm', 'carrier', 'client']
+    missing = [f for f in required if not body.get(f)]
+    if missing:
+        return response(400, {'error': f'Missing required fields: {", ".join(missing)}'})
+
+    message = {
+        'requestId': request_id,
+        'action': 'BD_CHANGE',
+        'requestData': body,
+        'timestamp': _now(),
+    }
+
+    try:
+        sqs = boto3.client('sqs', region_name=SQS_REGION)
+        sqs.send_message(
+            QueueUrl=queue_url,
+            MessageBody=json.dumps(message),
+            MessageAttributes={
+                'action': {'StringValue': 'BD_CHANGE', 'DataType': 'String'},
+            },
+        )
+    except Exception as exc:
+        return response(500, {'error': f'Failed to enqueue transfer request: {str(exc)}'})
+
+    return response(202, {
+        'code': 'QUEUED',
+        'message': 'Transfer request queued for processing',
+        'requestId': request_id,
+        'processingMode': 'deferred',
+        'estimatedResponseTime': 'PT5M',
+    })
 
 
 def handler(event, context):
@@ -210,6 +351,11 @@ def handler(event, context):
             body = json.loads(event['body'])
         except json.JSONDecodeError:
             return response(400, {'error': 'Invalid JSON body'})
+    body = body or {}
+
+    # Extract requestId header (case-insensitive) — ULID format per spec v0.1.1
+    headers = {k.lower(): v for k, v in (event.get('headers') or {}).items()}
+    request_id = headers.get('requestid')
 
     try:
         # Route: GET /agent/{npn}
@@ -224,13 +370,13 @@ def handler(event, context):
         if len(segments) == 3 and segments[0] == 'agent' and segments[2] == 'clients' and http_method == 'POST':
             return create_client(segments[1], body)
 
-        # Route: GET /agent/{npn}/transactions
-        if len(segments) == 3 and segments[0] == 'agent' and segments[2] == 'transactions' and http_method == 'GET':
-            return get_agent_transactions(segments[1])
+        # Route: GET /agent/{npn}/requests
+        if len(segments) == 3 and segments[0] == 'agent' and segments[2] == 'requests' and http_method == 'GET':
+            return get_agent_requests(segments[1])
 
-        # Route: POST /agent/{npn}/transactions
-        if len(segments) == 3 and segments[0] == 'agent' and segments[2] == 'transactions' and http_method == 'POST':
-            return create_transaction(segments[1], body)
+        # Route: POST /agent/{npn}/requests
+        if len(segments) == 3 and segments[0] == 'agent' and segments[2] == 'requests' and http_method == 'POST':
+            return create_request(segments[1], body)
 
         # Route: GET /client/{clientId}
         if len(segments) == 2 and segments[0] == 'client' and http_method == 'GET':
@@ -239,6 +385,18 @@ def handler(event, context):
         # Route: GET /client/{clientId}/contracts
         if len(segments) == 3 and segments[0] == 'client' and segments[2] == 'contracts' and http_method == 'GET':
             return get_client_contracts(segments[1])
+
+        # Route: POST /trigger-policy-inquiry
+        if len(segments) == 1 and segments[0] == 'trigger-policy-inquiry' and http_method == 'POST':
+            if not request_id:
+                return response(400, {'error': 'requestId header is required'})
+            return trigger_policy_inquiry(body, request_id)
+
+        # Route: POST /trigger-transfer-request
+        if len(segments) == 1 and segments[0] == 'trigger-transfer-request' and http_method == 'POST':
+            if not request_id:
+                return response(400, {'error': 'requestId header is required'})
+            return trigger_transfer_request(body, request_id)
 
         # Health check
         if path in ['/', '/health']:
