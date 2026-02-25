@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 CARRIER_TABLES = {
     "ATH": {"table": "carrier", "carrierName": "Athene"},
     "PAC": {"table": "carrier-2", "carrierName": "Pacific Life"},
+    "PRU": {"table": "carrier-3", "carrierName": "Prudential"},
 }
 
 # Value mappings from carrier DB format to API spec format
