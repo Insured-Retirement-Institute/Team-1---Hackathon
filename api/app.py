@@ -83,7 +83,7 @@ def internal_error(e):
     )
 
 
-def lambda_handler(event, context):
+def handler(event, context):
     event = normalize_lambda_event(event)
     return serverless_wsgi.handle_request(app, event, context)
 

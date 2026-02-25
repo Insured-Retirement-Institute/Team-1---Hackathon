@@ -1,4 +1,4 @@
-# .\scripts\deploy-lambda.ps1 -FunctionName api
+# .\scripts\deploy-lambda.ps1 -FunctionName event-listener
 
 param(
     [Parameter(Mandatory=$true)]
@@ -6,7 +6,7 @@ param(
 
     [string]$Region = "us-east-1",
     [string]$RuntimeVersion = "python3.12",
-    [string]$Handler = "app.lambda_handler",
+    [string]$Handler = "app.handler",
     [string]$Role = "arn:aws:iam::762233730742:role/lambda-execution-role",
     [string]$Description = "Lambda function"
 )
