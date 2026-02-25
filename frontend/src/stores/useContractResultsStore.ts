@@ -245,8 +245,7 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 			.filter(c => c.contractNumber.trim() !== '')
 			.map(c => c.contractNumber)
 
-		// await new Promise(resolve => setTimeout(resolve, 2000))
-		await useEventSource().waitForEvent(() => true)
+		await new Promise(resolve => setTimeout(resolve, 2000))
 
 		try {
 			// Try API call

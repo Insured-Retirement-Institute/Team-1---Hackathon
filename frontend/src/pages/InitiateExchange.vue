@@ -34,6 +34,10 @@ onChange(async files => {
 	searchContracts.value = []
 	contractResultsStore.addSearchContract({ contractNumber: '43573928457' })
 	contractResultsStore.addSearchContract({ contractNumber: '549384578932' })
+	contractResultsStore.addSearchContract({ contractNumber: '3409345867457' })
+	contractResultsStore.addSearchContract({ contractNumber: 'AGD23534758' })
+	contractResultsStore.addSearchContract({ contractNumber: 'XXFGHJKDHKJ' })
+	contractResultsStore.addSearchContract({ contractNumber: 'YYU423534' })
 })
 </script>
 
