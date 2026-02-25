@@ -19,7 +19,6 @@ if (searchContracts.value.length === 0) {
 
 <template>
 	<div class="w-full">
-		<FwbHeading tag="h1" class="text-center mb-4">Initiate Broker Dealer Exchange</FwbHeading>
 
 		<div class="p-10 bg-[#f8f8f8] rounded-xl mb-4">
 			<div class="flex flex-wrap *:p-4 items-center">

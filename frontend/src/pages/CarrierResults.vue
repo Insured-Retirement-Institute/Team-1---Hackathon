@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { FwbHeading } from 'flowbite-vue';
 import ContractResultsTable from '@/components/ContractResultsTable.vue';
 import { useContractResultsStore } from '@/stores/useContractResultsStore';
 
@@ -9,7 +8,6 @@ const contractResultsStore = useContractResultsStore()
 
 <template>
 	<div class="w-full">
-		<FwbHeading tag="h1" class="text-center mb-4">Carrier Results</FwbHeading>
 		<ContractResultsTable :records="contractResultsStore.carrierContractResults" />
 	</div>
 </template>

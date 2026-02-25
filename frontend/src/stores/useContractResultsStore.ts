@@ -127,10 +127,6 @@ function generateFakeDtccResult(searchContract: ContractRecord, index: number): 
 		contractStatus = randomEnumValue(ContractStatus)
 	}
 
-	if (contractStatus === ContractStatus.Unappointed) {
-		contractStatus = ContractStatus.Inactive
-	}
-
 	if (resolved) {
 		const carrierName = randomElement(CARRIER_NAMES)
 		const productName = CARRIER_PRODUCTS[carrierName]!
@@ -238,11 +234,13 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 
 	async function initiateDtccSearch(): Promise<void> {
 		const loaderStore = useLoaderStore()
-		loaderStore.open('Searching DTCC contracts...')
+		loaderStore.open('Locating Contracts')
 
 		const contractNumbers = searchContracts.value
 			.filter(c => c.contractNumber.trim() !== '')
 			.map(c => c.contractNumber)
+
+		await new Promise(resolve => setTimeout(resolve, 2000))
 
 		try {
 			// Try API call
@@ -292,10 +290,12 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 
 	async function initiateCarrierSearch(): Promise<void> {
 		const loaderStore = useLoaderStore()
-		loaderStore.open('Searching carrier contracts...')
+		loaderStore.open('Checking with carriers')
 
 		const selectedRecords = dtccContractResults.value.filter(r => r.selected)
 		const policyNumbers = selectedRecords.map(r => r.contractNumber)
+
+			await new Promise(resolve => setTimeout(resolve, 3000))
 
 		try {
 			// Try API call

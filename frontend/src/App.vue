@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { FwbButton } from 'flowbite-vue';
+import { FwbButton, FwbHeading } from 'flowbite-vue';
 import { useRoute, useRouter } from 'vue-router';
 import AppLoader from '@/components/AppLoader.vue';
 import type { RouteMeta } from '@/router';
@@ -23,9 +23,12 @@ awsTest()
 	<div class="flex flex-col h-screen">
 		<AppLoader />
 		<NavBar />
-		<div class="flex flex-wrap w-full *:p-2 grow overflow-auto p-10">
+		<FwbHeading v-if="route.meta.title" tag="h2" class="text-center mb-4">
+			{{ route.meta.title }}
+		</FwbHeading>
+		<div class="flex flex-wrap w-full *:p-2 grow overflow-auto px-10 py-5">
 			<RouterView v-slot="{ Component }">
-				<Transition name="fade">
+				<Transition name="slide" mode="out-in">
 					<component :is="Component"/>
 				</Transition>
 			</RouterView>

@@ -7,9 +7,12 @@ import { ContractStatus, type ContractRecord } from '@/models/ContractRecord'
 type SortableColumn = keyof Omit<ContractRecord, 'id'>
 type SortDirection = 'asc' | 'desc'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
 	records: ContractRecord[]
-}>()
+	showActions?: boolean
+}>(), {
+	showActions: true
+})
 
 const sortColumn = ref<SortableColumn | null>(null)
 const sortDirection = ref<SortDirection>('asc')
@@ -130,7 +133,7 @@ function getStatusBadgeType(status: ContractStatus): 'green' | 'yellow' | 'red' 
 								</button>
 							</div>
 						</th>
-						<th scope="col" class="px-6 py-3">
+						<th v-if="showActions" scope="col" class="px-6 py-3">
 							<span class="sr-only">Actions</span>
 						</th>
 					</tr>
@@ -179,7 +182,7 @@ function getStatusBadgeType(status: ContractStatus): 'green' | 'yellow' | 'red' 
 								{{ record.contractStatus }}
 							</FwbBadge>
 						</td>
-						<td class="px-6 py-4 text-right">
+						<td v-if="showActions" class="px-6 py-4 text-right">
 							<FwbButton v-if="record.contractStatus === ContractStatus.Unappointed" color="default" class="cursor-pointer">
 								Complete Training
 							</FwbButton>

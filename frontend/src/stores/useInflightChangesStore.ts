@@ -42,7 +42,7 @@ export const useInflightChangesStore = defineStore('inflightChanges', () => {
 		try {
 			// Simulate API call with mock data
 			await new Promise(resolve => setTimeout(resolve, 300))
-			inflightChanges.value = generateMockInflightChanges(clientIds, 12)
+			inflightChanges.value = generateMockInflightChanges(clientIds, 4)
 		} finally {
 			isLoading.value = false
 		}

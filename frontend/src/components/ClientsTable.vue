@@ -80,12 +80,14 @@ function formatDate(dateString: string): string {
 			</div>
 
 			<div class="flex items-center gap-2">
-				<FwbButton color="default">
-					<div class="flex items-center gap-2">
-						<CirclePlusIcon />
-						Add Client
-					</div>
-				</FwbButton>
+				<RouterLink to="/initiate-exchange">
+					<FwbButton color="default" class="cursor-pointer">
+						<div class="flex items-center gap-2">
+							<CirclePlusIcon />
+							Add Client
+						</div>
+					</FwbButton>
+				</RouterLink>
 
 				<FwbDropdown text="Filters" color="light">Filters</FwbDropdown>
 				<FwbDropdown text="Actions" color="light">Actions</FwbDropdown>
