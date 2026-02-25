@@ -36,19 +36,14 @@ for filename in os.listdir(routes_dir):
         try:
             module = importlib.import_module(module_name)
             if hasattr(module, 'BP'):
-                # Prefer URL_PREFIX defined in the module; fall back to auto-generated
-                # prefix derived from the filename (e.g. broker_dealer → /api/broker-dealer).
-                url_prefix = getattr(
-                    module,
-                    'URL_PREFIX',
-                    f"/api/{filename[:-3].replace('_', '-')}"
-                )
+                # URL prefix with /v1/ base (e.g., insurance_carrier.py -> /v1/insurance-carrier)
+                url_prefix = f"/v1/{filename[:-3].replace('_', '-')}"
                 app.register_blueprint(module.BP, url_prefix=url_prefix)
         except Exception as e:
             print(f"Failed to import {module_name}: {e}")
 
 
-@app.route('/api/health', methods=['GET'])
+@app.route('/v1/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
     return jsonify({

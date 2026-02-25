@@ -88,19 +88,19 @@ URL_PREFIX = "/api/insurance-carriers"
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ── AgentCore carrier validation agent ─────────────────────────────────────────
-# Deployed in us-east-1; routes to the carrier agent by default (agent_type omitted).
-AGENT_ARN = (
-    "arn:aws:bedrock-agentcore:us-east-1:762233730742"
-    ":runtime/iri_producer_change_agent-nLtgj9FbJl"
-)
-AGENT_REGION = "us-east-1"
-AGENT_HOST = f"bedrock-agentcore.{AGENT_REGION}.amazonaws.com"
-
-# ── Carrier table mapping ───────────────────────────────────────────────────────
+# Carrier table mapping by policy prefix
 CARRIER_TABLES = {
     "ATH": {"table": "carrier", "carrierName": "Athene"},
     "PAC": {"table": "carrier-2", "carrierName": "Pacific Life"},
+    "PRU": {"table": "carrier-3", "carrierName": "Prudential"},
+}
+
+# Carrier-specific configurations for direct carrier endpoints
+# Policy numbers are stored without prefix in carrier-specific tables
+CARRIER_CONFIGS = {
+    "athene": {"table": "carrier", "carrierName": "Athene", "carrierId": "ATH1"},
+    "paclife": {"table": "carrier-2", "carrierName": "Pacific Life", "carrierId": "PAC1"},
+    "prudential": {"table": "carrier-3", "carrierName": "Prudential", "carrierId": "PRU1"},
 }
 
 # Value mappings from carrier DB format to API spec format
@@ -244,6 +244,23 @@ def lookup_policy(policy_number: str) -> dict:
     return policy
 
 
+def lookup_policy_from_table(policy_number: str, table_name: str, carrier_name: str) -> dict:
+    """
+    Look up a policy from a specific carrier table.
+    Policy numbers are stored without carrier prefix.
+    Returns the policy record or None if not found.
+    """
+    policy = get_item(
+        table_name,
+        f"POLICY#{policy_number}",
+        f"POLICY#{policy_number}"
+    )
+
+    if policy:
+        policy["_carrierName"] = carrier_name
+    return policy
+
+
 def format_policy_for_response(policy: dict, client_ssn: str = None) -> dict:
     """
     Format a carrier DB policy record to PolicyInquiryResponse DetailedPolicyInfo format.
@@ -300,13 +317,164 @@ def health_check():
     }), 200
 
 
-@BP.route('/submit-policy-inquiry-request', methods=['POST'])
-def submit_policy_inquiry_request():
+def _process_carrier_policy_inquiry(carrier_key: str):
     """
-    Receive policy inquiry request (direct or via clearinghouse).
+    Common policy inquiry logic for carrier-specific endpoints.
+    Looks up policies only from the specified carrier's table.
+    """
+    carrier_config = CARRIER_CONFIGS.get(carrier_key)
+    if not carrier_config:
+        return create_error_response(
+            "INVALID_CARRIER",
+            f"Unknown carrier: {carrier_key}",
+            400
+        )
 
-    Looks up policies from the carrier DynamoDB tables and returns
-    detailed policy information immediately.
+    table_name = carrier_config["table"]
+    carrier_name = carrier_config["carrierName"]
+
+    transaction_id, error = validate_transaction_id(request.headers)
+    if error:
+        return error
+
+    try:
+        data = request.get_json()
+        if not data:
+            return create_error_response(
+                "INVALID_PAYLOAD",
+                "Request body is required",
+                400
+            )
+
+        if 'requestingFirm' not in data or 'client' not in data:
+            return create_error_response(
+                "VALIDATION_ERROR",
+                "requestingFirm and client are required fields",
+                400
+            )
+
+        requesting_firm = data.get('requestingFirm', {})
+        client = data.get('client', {})
+        servicing_agent = requesting_firm.get('servicingAgent', {})
+
+        logger.info(f"[{carrier_name}] Policy inquiry - Transaction ID: {transaction_id}")
+        logger.info(f"[{carrier_name}] Client: {client.get('clientName')}")
+        logger.info(f"[{carrier_name}] Policy Numbers: {client.get('policyNumbers', [])}")
+
+        client_ssn = client.get('ssn')
+        policy_numbers = client.get('policyNumbers', [])
+
+        producer_errors = validate_producer(
+            servicing_agent.get('agentName'),
+            servicing_agent.get('npn')
+        )
+
+        policies = []
+        client_name_from_db = None
+        ssn_last4 = client_ssn[-4:] if client_ssn and len(client_ssn) >= 4 else None
+
+        for policy_number in policy_numbers:
+            # Look up policy directly (no prefix validation needed)
+            policy = lookup_policy_from_table(policy_number, table_name, carrier_name)
+            if policy:
+                if not client_name_from_db:
+                    client_name_from_db = policy.get('clientName')
+                    if not ssn_last4 and policy.get('ownerSSN'):
+                        ssn_last4 = policy.get('ownerSSN')[-4:]
+
+                formatted_policy = format_policy_for_response(policy, client_ssn)
+                policies.append(formatted_policy)
+            else:
+                policies.append({
+                    "policyNumber": policy_number,
+                    "carrierName": carrier_name,
+                    "errors": [{
+                        "errorCode": "policyNotFound",
+                        "message": f"Policy {policy_number} not found in {carrier_name} records"
+                    }]
+                })
+
+        response_payload = {
+            "requestingFirm": {
+                "firmName": requesting_firm.get('firmName'),
+                "firmId": requesting_firm.get('firmId'),
+                "servicingAgent": {
+                    "agentName": servicing_agent.get('agentName'),
+                    "npn": servicing_agent.get('npn')
+                }
+            },
+            "producerValidation": {
+                "agentName": servicing_agent.get('agentName'),
+                "npn": servicing_agent.get('npn'),
+                "errors": producer_errors
+            },
+            "client": {
+                "clientName": client_name_from_db or client.get('clientName'),
+                "ssnLast4": ssn_last4,
+                "policies": policies
+            },
+            "enums": {
+                "accountType": ["individual", "joint", "trust", "custodial", "entity"],
+                "planType": ["nonQualified", "rothIra", "traditionalIra", "sep", "simple"]
+            }
+        }
+
+        logger.info(f"[{carrier_name}] Returning {len(policies)} policies for transaction {transaction_id}")
+
+        return create_response(
+            "IMMEDIATE",
+            f"Policy inquiry processed successfully by {carrier_name}",
+            transaction_id,
+            response_payload,
+            200,
+            processing_mode="immediate"
+        )
+
+    except Exception as e:
+        logger.error(f"[{carrier_name}] Error processing policy inquiry: {str(e)}")
+        return create_error_response(
+            "INTERNAL_ERROR",
+            "Internal server error occurred",
+            500
+        )
+
+
+@BP.route('/athene/policy-inquiry', methods=['POST'])
+def athene_policy_inquiry():
+    """
+    Athene-specific policy inquiry endpoint.
+    Looks up policies from the 'carrier' table (Athene policies with ATH- prefix).
+    """
+    return _process_carrier_policy_inquiry("athene")
+
+
+@BP.route('/paclife/policy-inquiry', methods=['POST'])
+def paclife_policy_inquiry():
+    """
+    Pacific Life-specific policy inquiry endpoint.
+    Looks up policies from the 'carrier-2' table (Pacific Life policies with PAC- prefix).
+    """
+    return _process_carrier_policy_inquiry("paclife")
+
+
+@BP.route('/prudential/policy-inquiry', methods=['POST'])
+def prudential_policy_inquiry():
+    """
+    Prudential-specific policy inquiry endpoint.
+    Looks up policies from the 'carrier-3' table (Prudential policies with PRU- prefix).
+    """
+    return _process_carrier_policy_inquiry("prudential")
+
+
+@BP.route('/policy-inquiry', methods=['POST'])
+def policy_inquiry():
+    """
+    Process policy inquiry request (direct or via clearinghouse).
+
+    Accept policy inquiry request to provide policy information for specified accounts.
+    Carrier responds immediately with policy data from carrier tables.
+
+    Unified API endpoint - replaces /submit-policy-inquiry-request
     """
     transaction_id, error = validate_transaction_id(request.headers)
     if error:
@@ -400,10 +568,15 @@ def submit_policy_inquiry_request():
         return create_error_response("INTERNAL_ERROR", "Internal server error occurred", 500)
 
 
-@BP.route('/submit-policy-inquiry-response', methods=['POST'])
-def submit_policy_inquiry_response():
+@BP.route('/policy-inquiry-callback', methods=['POST'])
+def policy_inquiry_callback():
     """
-    Submit policy inquiry response to clearinghouse (for deferred processing).
+    Policy inquiry callback - submit policy inquiry response.
+
+    Submit detailed policy information response to clearinghouse after
+    processing a deferred request.
+
+    Unified API endpoint - replaces /submit-policy-inquiry-response
     """
     transaction_id, error = validate_transaction_id(request.headers)
     if error:
@@ -432,57 +605,19 @@ def submit_policy_inquiry_response():
         return create_error_response("INTERNAL_ERROR", "Internal server error occurred", 500)
 
 
-@BP.route('/receive-bd-change-request', methods=['POST'])
-def receive_bd_change_request():
+@BP.route('/bd-change', methods=['POST'])
+def bd_change():
     """
-    Receive a BD change validation request and return a synchronous IGO/NIGO determination.
+    Brokerage dealer change request.
+    Validates and approves/rejects broker-dealer changes.
 
-    This is the primary integration point between the clearinghouse/BD and the carrier's
-    AI-powered validation engine (Amazon Bedrock AgentCore).
+    The carrier performs validation checks including:
+    - Agent licensing verification
+    - Carrier appointment verification
+    - Suitability requirements
+    - Policy-specific rules
 
-    The AgentCore carrier agent performs the following steps:
-      1. Looks up each policy in the carrier DynamoDB table by contract number.
-      2. Evaluates all 9 business rules:
-           RULE-001  Client signature present
-           RULE-002  BD authorization signature present
-           RULE-003  Signatures not older than 90 days
-           RULE-004  Receiving agent is different from current servicing agent
-           RULE-005  Receiving agent status is ACTIVE
-           RULE-006  Receiving agent is appointed with this carrier
-           RULE-007  Receiving agent has current E&O coverage on file
-           RULE-008  Receiving agent is licensed in the policy's state
-           RULE-009  Receiving broker-dealer has an active selling agreement
-      3. Returns a structured JSON determination (IGO or NIGO) with per-rule results,
-         deficiency codes, corrective actions, and a plain-language summary.
-
-    Required header:
-      transactionId: <UUID>
-
-    Required body fields (BdChangeRequest per insurance-carrier-api.yaml):
-      receivingBrokerId    string   Identifier of the receiving broker-dealer
-      deliveringBrokerId   string   Identifier of the delivering broker-dealer
-      carrierId            string   Carrier identifier (e.g. "ATH", "PAC")
-      policyNumber         string   Primary policy/contract number (e.g. "ATH-100053")
-
-    Carrier validation fields (pass in brokerDetails and top-level):
-      brokerDetails.npn              string   Receiving agent's NPN
-      brokerDetails.agentName        string   Receiving agent's name
-      brokerDetails.agentStatus      string   ACTIVE | SUSPENDED | TERMINATED | INACTIVE
-      brokerDetails.carrierAppointed boolean  True if appointed with this carrier
-      brokerDetails.eoInPlace        boolean  True if E&O coverage is current
-      brokerDetails.licensedStates   array    State codes where agent is licensed (e.g. ["TX"])
-      clientSSN                      string   Policy owner's SSN (for ownership verification)
-      clientSigned                   boolean  Whether client signed the change form
-      bdAuthorizedSigned             boolean  Whether BD home-office signed the form
-      signatureDate                  string   Date signatures were obtained (YYYY-MM-DD)
-
-    Response codes:
-      APPROVED  — IGO: all hard-stop rules passed; change may proceed
-      REJECTED  — NIGO: one or more hard-stop rules failed; see payload for details
-      ERROR     — AgentCore invocation failed; see message for details
-
-    Full carrier_determination.schema.json payload is included in every response
-    so callers receive actionable rule results and corrective actions in a single call.
+    Unified API endpoint - replaces /receive-bd-change-request
     """
     transaction_id, error = validate_transaction_id(request.headers)
     if error:
@@ -613,16 +748,13 @@ def bd_change():
     return receive_bd_change_request()
 
 
-@BP.route('/receive-transfer-notification', methods=['POST'])
-def receive_transfer_notification():
+@BP.route('/transfer-notification', methods=['POST'])
+def transfer_notification():
     """
-    Receive final service-agent transfer notification from clearinghouse.
+    Transfer notification - accept transfer-related notifications.
+    Supports various notification types per TransferNotification schema.
 
-    This endpoint acknowledges the completion of an approved service-agent change.
-    It is called AFTER the carrier has approved the change (via receive-bd-change-request)
-    and the transfer has been processed by the clearinghouse.
-
-    Required body fields: notificationType, policyNumber, carrierId
+    Unified API endpoint - replaces /receive-transfer-notification
     """
     transaction_id, error = validate_transaction_id(request.headers)
     if error:
@@ -633,8 +765,9 @@ def receive_transfer_notification():
         if not data:
             return create_error_response("INVALID_PAYLOAD", "Request body is required", 400)
 
-        required_fields = ['notificationType', 'policyNumber', 'carrierId']
-        missing_fields = [f for f in required_fields if f not in data]
+        # Validate required fields per TransferNotification schema
+        required_fields = ['notificationType', 'policyNumber']
+        missing_fields = [field for field in required_fields if field not in data]
         if missing_fields:
             return create_error_response(
                 "VALIDATION_ERROR",
@@ -643,10 +776,12 @@ def receive_transfer_notification():
             )
 
         notification_type = data.get('notificationType')
-        if notification_type != 'service-agent-change-complete':
+        valid_types = ['transfer-approved', 'transfer-initiated', 'transfer-confirmed',
+                       'transfer-complete', 'service-agent-change-complete']
+        if notification_type not in valid_types:
             return create_error_response(
                 "VALIDATION_ERROR",
-                "notificationType must be 'service-agent-change-complete'",
+                f"notificationType must be one of: {', '.join(valid_types)}",
                 400
             )
 
@@ -664,7 +799,7 @@ def receive_transfer_notification():
 
         return create_response(
             "RECEIVED",
-            "Transfer notification received and processed",
+            f"Transfer notification '{notification_type}' received and processed",
             transaction_id,
             None,
             200,
@@ -674,6 +809,134 @@ def receive_transfer_notification():
     except Exception as e:
         logger.error("Error processing transfer notification: %s", str(e))
         return create_error_response("INTERNAL_ERROR", "Internal server error occurred", 500)
+
+
+@BP.route('/bd-change-callback', methods=['POST'])
+def bd_change_callback():
+    """
+    BD change callback - submit carrier validation response.
+    Used to report approval/rejection to clearinghouse.
+
+    Unified API endpoint.
+    """
+    transaction_id, error = validate_transaction_id(request.headers)
+    if error:
+        return error
+
+    try:
+        data = request.get_json()
+        if not data:
+            return create_error_response(
+                "INVALID_PAYLOAD",
+                "Request body is required",
+                400
+            )
+
+        # Validate required fields per CarrierResponse schema
+        required_fields = ['carrierId', 'policyNumber', 'validationResult']
+        missing_fields = [field for field in required_fields if field not in data]
+        if missing_fields:
+            return create_error_response(
+                "VALIDATION_ERROR",
+                f"Missing required fields: {', '.join(missing_fields)}",
+                400
+            )
+
+        validation_result = data.get('validationResult')
+        if validation_result not in ['approved', 'rejected']:
+            return create_error_response(
+                "VALIDATION_ERROR",
+                "validationResult must be either 'approved' or 'rejected'",
+                400
+            )
+
+        logger.info(f"Submitting carrier response - Transaction ID: {transaction_id}")
+        logger.info(f"Carrier: {data.get('carrierId')}")
+        logger.info(f"Policy Number: {data.get('policyNumber')}")
+        logger.info(f"Validation Result: {validation_result}")
+
+        # TODO: Forward to clearinghouse
+        # - Send response to clearinghouse endpoint
+        # - Update local transaction status
+
+        return create_response(
+            "RECEIVED",
+            f"Carrier validation response submitted - {validation_result}",
+            transaction_id,
+            None,
+            200
+        )
+
+    except Exception as e:
+        logger.error(f"Error submitting carrier response: {str(e)}")
+        return create_error_response(
+            "INTERNAL_ERROR",
+            "Internal server error occurred",
+            500
+        )
+
+
+@BP.route('/transfer-confirmation', methods=['POST'])
+def transfer_confirmation():
+    """
+    Transfer confirmation - accept transfer confirmation.
+
+    Unified API endpoint.
+    """
+    transaction_id, error = validate_transaction_id(request.headers)
+    if error:
+        return error
+
+    try:
+        data = request.get_json()
+        if not data:
+            return create_error_response(
+                "INVALID_PAYLOAD",
+                "Request body is required",
+                400
+            )
+
+        # Validate required fields per TransferConfirmation schema
+        required_fields = ['policyNumber', 'confirmationStatus']
+        missing_fields = [field for field in required_fields if field not in data]
+        if missing_fields:
+            return create_error_response(
+                "VALIDATION_ERROR",
+                f"Missing required fields: {', '.join(missing_fields)}",
+                400
+            )
+
+        confirmation_status = data.get('confirmationStatus')
+        if confirmation_status not in ['confirmed', 'failed', 'pending']:
+            return create_error_response(
+                "VALIDATION_ERROR",
+                "confirmationStatus must be one of: 'confirmed', 'failed', 'pending'",
+                400
+            )
+
+        logger.info(f"Received transfer confirmation - Transaction ID: {transaction_id}")
+        logger.info(f"Policy Number: {data.get('policyNumber')}")
+        logger.info(f"Confirmation Status: {confirmation_status}")
+
+        # TODO: Process transfer confirmation
+        # - Update policy records
+        # - Finalize broker change
+
+        return create_response(
+            "RECEIVED",
+            f"Transfer confirmation received - {confirmation_status}",
+            transaction_id,
+            None,
+            200
+        )
+
+    except Exception as e:
+        logger.error(f"Error processing transfer confirmation: {str(e)}")
+        return create_error_response(
+            "INTERNAL_ERROR",
+            "Internal server error occurred",
+            500
+        )
 
 
 @BP.route('/query-status/<transaction_id>', methods=['GET'])

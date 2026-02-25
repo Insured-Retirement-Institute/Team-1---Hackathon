@@ -4,6 +4,7 @@ import { AccountType, ContractStatus, OwnershipType, PlanType, type ContractReco
 import { useLoaderStore } from '@/stores/useLoaderStore'
 import { brokerDealerApi, insuranceCarrierApi } from '@/api/Api'
 import { isClientResponse, type DetailedPolicyInfo, type PolicyInquiryRequest } from '@/models/ClearinghouseApi'
+import { useEventSource } from '@/utils/useEventSource'
 
 const CARRIER_PRODUCTS: Record<string, string> = {
 	'Allianz Life': 'Allianz 222® Annuity',
@@ -223,8 +224,12 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 		}
 	}
 
-	function addSearchContract() {
-		searchContracts.value.push(createEmptyContract())
+	function addSearchContract(options: Partial<ContractRecord> = {}) {
+		const contract = createEmptyContract()
+		searchContracts.value.push({
+			...contract,
+			...options
+		})
 	}
 
 	function removeSearchContract(id: string | number) {

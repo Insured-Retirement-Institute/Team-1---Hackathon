@@ -156,12 +156,14 @@ def health_check():
     }), 200
 
 
-@BP.route('/submit-policy-inquiry-request', methods=['POST'])
-def submit_policy_inquiry_request():
+@BP.route('/policy-inquiry', methods=['POST'])
+def policy_inquiry():
     """
-    Receive policy inquiry request from clearinghouse
-    Endpoint for delivering broker-dealer only
+    Process policy inquiry request.
+    Endpoint for delivering broker-dealer - receives from clearinghouse or direct.
     Stores the request in the distributor table.
+
+    Unified API endpoint - replaces /submit-policy-inquiry-request
     """
     transaction_id, error = validate_transaction_id(request.headers)
     if error:
@@ -201,7 +203,14 @@ def submit_policy_inquiry_request():
         policy_id = policy_numbers[0] if policy_numbers else "UNKNOWN"
 
         # Determine carrier from policy prefix
-        carrier_id = "carrier" if policy_id.startswith("ATH") else "carrier-2"
+        if policy_id.startswith("ATH"):
+            carrier_id = "carrier"
+        elif policy_id.startswith("PAC"):
+            carrier_id = "carrier-2"
+        elif policy_id.startswith("PRU"):
+            carrier_id = "carrier-3"
+        else:
+            carrier_id = "unknown"
 
         record = create_transaction_record(
             transaction_id=transaction_id,
@@ -255,12 +264,14 @@ def submit_policy_inquiry_request():
         )
 
 
-@BP.route('/receive-policy-inquiry-response', methods=['POST'])
-def receive_policy_inquiry_response():
+@BP.route('/policy-inquiry-callback', methods=['POST'])
+def policy_inquiry_callback():
     """
-    Receive policy inquiry response from clearinghouse
-    Endpoint for receiving broker-dealer only
+    Policy inquiry callback - receive policy inquiry response.
+    Endpoint for receiving broker-dealer - receives from clearinghouse or direct.
     Updates the transaction status to MANIFEST_RECEIVED.
+
+    Unified API endpoint - replaces /receive-policy-inquiry-response
     """
     transaction_id, error = validate_transaction_id(request.headers)
     if error:
@@ -318,12 +329,14 @@ def receive_policy_inquiry_response():
         )
 
 
-@BP.route('/receive-bd-change-request', methods=['POST'])
-def receive_bd_change_request():
+@BP.route('/bd-change', methods=['POST'])
+def bd_change():
     """
-    Receive BD change request from clearinghouse
-    Endpoint for receiving broker-dealer only
+    Brokerage dealer change request.
+    Endpoint for receiving broker-dealer - receives from clearinghouse or direct.
     Updates transaction status.
+
+    Unified API endpoint - replaces /receive-bd-change-request
     """
     transaction_id, error = validate_transaction_id(request.headers)
     if error:
@@ -382,11 +395,14 @@ def receive_bd_change_request():
         )
 
 
-@BP.route('/receive-transfer-notification', methods=['POST'])
-def receive_transfer_notification():
+@BP.route('/transfer-notification', methods=['POST'])
+def transfer_notification():
     """
-    Receive transfer notification from clearinghouse
+    Transfer notification - accept transfer-related notifications.
+    Receives from clearinghouse or direct.
     Accepts transfer-related notifications and updates status.
+
+    Unified API endpoint - replaces /receive-transfer-notification
     """
     transaction_id, error = validate_transaction_id(request.headers)
     if error:
@@ -401,8 +417,8 @@ def receive_transfer_notification():
                 400
             )
 
-        # Validate required fields
-        required_fields = ['transaction-id', 'notification-type', 'policy-id']
+        # Validate required fields per TransferNotification schema
+        required_fields = ['notificationType', 'policyNumber']
         missing_fields = [field for field in required_fields if field not in data]
         if missing_fields:
             return create_error_response(
@@ -411,19 +427,19 @@ def receive_transfer_notification():
                 400
             )
 
-        notification_type = data.get('notification-type')
+        notification_type = data.get('notificationType')
         valid_types = ['transfer-approved', 'transfer-initiated',
-                       'transfer-confirmed', 'transfer-complete']
+                       'transfer-confirmed', 'transfer-complete', 'service-agent-change-complete']
         if notification_type not in valid_types:
             return create_error_response(
                 "VALIDATION_ERROR",
-                f"Invalid notification-type. Must be one of: {', '.join(valid_types)}",
+                f"Invalid notificationType. Must be one of: {', '.join(valid_types)}",
                 400
             )
 
         logger.info(f"Received transfer notification - Transaction ID: {transaction_id}")
         logger.info(f"Notification Type: {notification_type}")
-        logger.info(f"Policy ID: {data.get('policy-id')}")
+        logger.info(f"Policy Number: {data.get('policyNumber')}")
 
         # Map notification type to status
         notification_to_status = {
@@ -454,9 +470,9 @@ def receive_transfer_notification():
                 record["sk"],
                 updates={
                     "latest-notification": {
-                        "notification-type": notification_type,
-                        "notification-timestamp": get_timestamp(),
-                        "policy-id": data.get('policy-id'),
+                        "notificationType": notification_type,
+                        "notificationTimestamp": get_timestamp(),
+                        "policyNumber": data.get('policyNumber'),
                     }
                 }
             )
@@ -477,261 +493,178 @@ def receive_transfer_notification():
         )
 
 
-# ── PDF Policy Statement Extractor ─────────────────────────────────────────────
-# Uses Claude via Bedrock converse() with a native document block.
-# No text-extraction library needed — Claude reads the PDF layout directly.
-
-_PDF_MODEL_ID = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
-_PDF_REGION   = "us-east-1"
-
-_PDF_SYSTEM_PROMPT = """You are a document data extraction specialist for annuity policy statements.
-
-Your job: read the provided policy statement PDF and extract every relevant field into a
-policyInquiryResponse JSON object. Return ONLY the JSON — no markdown, no code fences,
-no explanation, no prose before or after.
-
-───────────────────────────────────────────────────────────────────────────────
-FIELD EXTRACTION GUIDE
-───────────────────────────────────────────────────────────────────────────────
-
-requestingFirm
-  firmName  → The BROKER-DEALER or financial advisory FIRM that submitted this application
-              (e.g. "Strategic Wealth Advisors", "Premier Financial Services").
-              This is NOT the insurance carrier. Look for labels like "Broker-Dealer",
-              "Selling Firm", "Advisor Firm", "Receiving Firm", "BD Firm", or the
-              firm associated with the servicing agent's employer.
-  firmId    → The BD firm's identifier (DTCC ID, CRD, or internal firm ID shown on the
-              document). null if not present.
-  servicingAgent
-    agentName → Full name of the financial adviser / agent of record / servicing agent
-    npn       → Agent's National Producer Number (NPN). null if not shown.
-
-producerValidation
-  agentName → Same as requestingFirm.servicingAgent.agentName
-  npn       → Same as requestingFirm.servicingAgent.npn
-  errors    → Always []
-
-client
-  clientName  → For INDIVIDUAL accounts: the policy owner's full legal name.
-                For TRUST accounts: the full trust name (e.g. "Foster Family Irrevocable Trust"),
-                NOT the trustee's personal name.
-                For BUSINESS/ENTITY accounts: the entity name.
-  ssnLast4    → Last 4 digits of SSN. For trusts, use the trustee/representative's SSN last 4.
-                For businesses, use the Tax ID last 4. null if not shown at all.
-  policies    → Array — one entry per policy/contract found in the document.
-
-For each policy found:
-  policyNumber      → Contract or policy number exactly as printed
-  carrierName       → Full name of the INSURANCE CARRIER that issued the annuity
-                      (e.g. "Crestview Insurance", "Athene Annuity"). This is NOT the BD firm.
-  accountType       → Map registration type to exactly one of:
-                        individual | joint | trust | custodial | entity
-                      (default "individual" if unclear)
-  planType          → Map tax qualification to exactly one of:
-                        nonQualified | rothIra | traditionalIra | sep | simple
-                      (default "nonQualified" if unclear or not shown)
-  ownership         → "single" | "joint" | "trust" | "other" — null if not shown
-  productName       → Full annuity product name exactly as printed
-  cusip             → 9-character CUSIP identifier. Search the ENTIRE document carefully —
-                      it may appear in a product details section, header, or footer.
-                      Return the value if found; null only if genuinely absent after
-                      thorough review.
-  trailingCommission → false unless the document explicitly states trailing commission applies
-  contractStatus    → Map to exactly one of:
-                        active          — policy is in force / issued / current
-                        pending         — application submitted, not yet issued
-                        surrendered     — contract has been surrendered
-                        death claim pending — death claim in process
-                      Use "pending" if the document shows status "Pending", "Application",
-                      "Not Yet Issued", or similar pre-issuance language.
-  withdrawalStructure
-    systematicInPlace → true only if document explicitly shows a systematic withdrawal
-                        plan is currently active; false otherwise
-  errors            → [] (empty — no validation errors at extraction time)
-
-enums (always include these fixed values):
-  accountType: ["individual", "joint", "trust", "custodial", "entity"]
-  planType:    ["nonQualified", "rothIra", "traditionalIra", "sep", "simple"]
-
-───────────────────────────────────────────────────────────────────────────────
-OUTPUT STRUCTURE — return exactly this shape, nothing else:
-───────────────────────────────────────────────────────────────────────────────
-{
-  "policyInquiryResponse": {
-    "requestingFirm": {
-      "firmName": "...",
-      "firmId": null,
-      "servicingAgent": { "agentName": "...", "npn": "..." }
-    },
-    "producerValidation": {
-      "agentName": "...",
-      "npn": "...",
-      "errors": []
-    },
-    "client": {
-      "clientName": "...",
-      "ssnLast4": "...",
-      "policies": [
-        {
-          "policyNumber": "...",
-          "carrierName": "...",
-          "accountType": "individual",
-          "planType": "nonQualified",
-          "ownership": "single",
-          "productName": "...",
-          "cusip": null,
-          "trailingCommission": false,
-          "contractStatus": "active",
-          "withdrawalStructure": { "systematicInPlace": false },
-          "errors": []
-        }
-      ]
-    },
-    "enums": {
-      "accountType": ["individual", "joint", "trust", "custodial", "entity"],
-      "planType": ["nonQualified", "rothIra", "traditionalIra", "sep", "simple"]
-    }
-  }
-}
-"""
-
-
-def _strip_pdf_fences(text: str) -> str:
-    """Strip markdown code fences the model occasionally wraps around JSON."""
-    text = text.strip()
-    if text.startswith("```"):
-        lines = text.splitlines()
-        lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        text = "\n".join(lines).strip()
-    return text
-
-
-def _extract_from_pdf(pdf_base64: str, request_id: str) -> dict:
+@BP.route('/bd-change-callback', methods=['POST'])
+def bd_change_callback():
     """
-    Decode a Base64-encoded policy statement PDF and extract structured data via Bedrock.
+    BD change callback - receive carrier validation response.
+    Updates transaction status based on approval/rejection.
 
-    Passes the PDF as a native document block to Claude — no text extraction library needed.
-    Returns the parsed policyInquiryResponse dict.
-    Raises ValueError on bad base64, json.JSONDecodeError on non-JSON model output.
-    """
-    try:
-        pdf_bytes = base64.b64decode(pdf_base64, validate=False)
-    except Exception as e:
-        raise ValueError(f"Invalid base64 encoding: {e}") from e
-
-    logger.info("Sending PDF to Bedrock — request_id=%s size=%d bytes", request_id, len(pdf_bytes))
-
-    client = boto3.client("bedrock-runtime", region_name=_PDF_REGION)
-    response = client.converse(
-        modelId=_PDF_MODEL_ID,
-        system=[{"text": _PDF_SYSTEM_PROMPT}],
-        messages=[{
-            "role": "user",
-            "content": [
-                {
-                    "document": {
-                        "format": "pdf",
-                        "name": "policy_statement",
-                        "source": {"bytes": pdf_bytes},
-                    }
-                },
-                {
-                    "text": (
-                        f"Extract all policy information from this statement. "
-                        f"Request ID: {request_id}. "
-                        "Return ONLY the JSON object — no other text."
-                    )
-                },
-            ],
-        }],
-    )
-
-    raw = response["output"]["message"]["content"][0]["text"]
-    logger.info("Bedrock extraction complete — request_id=%s", request_id)
-    return json.loads(_strip_pdf_fences(raw))
-
-
-@BP.route('/extract-policy-from-pdf', methods=['POST'])
-def extract_policy_from_pdf():
-    """
-    Extract structured policy data from a Base64-encoded carrier policy statement PDF.
-
-    Passes the PDF natively to Claude via Bedrock converse() and returns a
-    policyInquiryResponse matching the Step 2 BD Change process format.
-    Each form may vary in the data it provides — all present fields are extracted,
-    absent fields are returned as null.
-
-    Required header:
-      transactionId: <UUID>
-
-    Required body fields:
-      requestId   string   Caller-supplied request identifier
-      pdfBase64   string   Base64-encoded bytes of the policy statement PDF
-
-    Response codes:
-      EXTRACTED   — extraction succeeded; policyInquiryResponse in payload
-      INVALID_PDF — base64 could not be decoded
-      EXTRACTION_ERROR — Bedrock call or JSON parse failure
+    Unified API endpoint.
     """
     transaction_id, error = validate_transaction_id(request.headers)
     if error:
         return error
 
-    data = request.get_json(silent=True)
-    if not data:
-        return create_error_response("INVALID_PAYLOAD", "JSON request body is required", 400)
+    try:
+        data = request.get_json()
+        if not data:
+            return create_error_response(
+                "INVALID_PAYLOAD",
+                "Request body is required",
+                400
+            )
 
-    missing = [f for f in ("requestId", "pdfBase64") if not data.get(f)]
-    if missing:
-        return create_error_response(
-            "VALIDATION_ERROR",
-            f"Missing required fields: {', '.join(missing)}",
-            400,
+        # Validate required fields per CarrierResponse schema
+        required_fields = ['carrierId', 'policyNumber', 'validationResult']
+        missing_fields = [field for field in required_fields if field not in data]
+        if missing_fields:
+            return create_error_response(
+                "VALIDATION_ERROR",
+                f"Missing required fields: {', '.join(missing_fields)}",
+                400
+            )
+
+        validation_result = data.get('validationResult')
+        if validation_result not in ['approved', 'rejected']:
+            return create_error_response(
+                "VALIDATION_ERROR",
+                "validationResult must be either 'approved' or 'rejected'",
+                400
+            )
+
+        logger.info(f"Received carrier response - Transaction ID: {transaction_id}")
+        logger.info(f"Carrier: {data.get('carrierId')}")
+        logger.info(f"Policy Number: {data.get('policyNumber')}")
+        logger.info(f"Validation Result: {validation_result}")
+
+        # Find and update existing transaction
+        record, table_name = find_transaction_by_id(transaction_id)
+
+        if record:
+            new_status = "CARRIER_APPROVED" if validation_result == "approved" else "CARRIER_REJECTED"
+            notes = f"Carrier {validation_result} the BD change request"
+            if validation_result == 'rejected':
+                rejection_reason = data.get('rejectionReason', 'Not provided')
+                notes += f": {rejection_reason}"
+
+            update_transaction_status(
+                table_name,
+                record["pk"],
+                record["sk"],
+                new_status,
+                notes
+            )
+            logger.info(f"Updated transaction {transaction_id} to {new_status}")
+
+        return create_response(
+            "RECEIVED",
+            f"Carrier validation response received - {validation_result}",
+            transaction_id
         )
 
-    request_id = data["requestId"]
-    logger.info("PDF extraction — transactionId=%s requestId=%s", transaction_id, request_id)
+    except Exception as e:
+        logger.error(f"Error processing carrier response: {str(e)}")
+        return create_error_response(
+            "INTERNAL_ERROR",
+            "Internal server error occurred",
+            500
+        )
+
+
+@BP.route('/transfer-confirmation', methods=['POST'])
+def transfer_confirmation():
+    """
+    Transfer confirmation - accept transfer confirmation.
+    Updates transaction status to TRANSFER_CONFIRMED or COMPLETE.
+
+    Unified API endpoint.
+    """
+    transaction_id, error = validate_transaction_id(request.headers)
+    if error:
+        return error
 
     try:
-        result = _extract_from_pdf(data["pdfBase64"], request_id)
-    except ValueError as e:
-        logger.error("PDF decode error — requestId=%s: %s", request_id, e)
-        return create_error_response("INVALID_PDF", str(e), 400)
-    except json.JSONDecodeError as e:
-        logger.error("Non-JSON model response — requestId=%s: %s", request_id, e)
-        return create_error_response(
-            "EXTRACTION_ERROR",
-            "Model returned non-JSON output. Verify the PDF is a readable policy statement.",
-            500,
+        data = request.get_json()
+        if not data:
+            return create_error_response(
+                "INVALID_PAYLOAD",
+                "Request body is required",
+                400
+            )
+
+        # Validate required fields per TransferConfirmation schema
+        required_fields = ['policyNumber', 'confirmationStatus']
+        missing_fields = [field for field in required_fields if field not in data]
+        if missing_fields:
+            return create_error_response(
+                "VALIDATION_ERROR",
+                f"Missing required fields: {', '.join(missing_fields)}",
+                400
+            )
+
+        confirmation_status = data.get('confirmationStatus')
+        if confirmation_status not in ['confirmed', 'failed', 'pending']:
+            return create_error_response(
+                "VALIDATION_ERROR",
+                "confirmationStatus must be one of: 'confirmed', 'failed', 'pending'",
+                400
+            )
+
+        logger.info(f"Received transfer confirmation - Transaction ID: {transaction_id}")
+        logger.info(f"Policy Number: {data.get('policyNumber')}")
+        logger.info(f"Confirmation Status: {confirmation_status}")
+
+        # Find and update existing transaction
+        record, table_name = find_transaction_by_id(transaction_id)
+
+        if record:
+            if confirmation_status == "confirmed":
+                update_transaction_status(
+                    table_name,
+                    record["pk"],
+                    record["sk"],
+                    "TRANSFER_CONFIRMED",
+                    "Transfer confirmed"
+                )
+                update_transaction_status(
+                    table_name,
+                    record["pk"],
+                    record["sk"],
+                    "COMPLETE",
+                    "BD change process completed successfully"
+                )
+                logger.info(f"Updated transaction {transaction_id} to COMPLETE")
+            elif confirmation_status == "failed":
+                update_transaction_status(
+                    table_name,
+                    record["pk"],
+                    record["sk"],
+                    "TRANSFER_PROCESSING",
+                    f"Transfer confirmation failed"
+                )
+
+        return create_response(
+            "RECEIVED",
+            f"Transfer confirmation received - {confirmation_status}",
+            transaction_id
         )
+
     except Exception as e:
-        logger.error("Extraction failed — requestId=%s: %s", request_id, e, exc_info=True)
-        return create_error_response("EXTRACTION_ERROR", str(e), 500)
-
-    policies = (
-        (result.get("policyInquiryResponse") or {})
-        .get("client", {})
-        .get("policies", [])
-    )
-    logger.info("Extraction successful — requestId=%s policies=%d", request_id, len(policies))
-
-    return create_response(
-        "EXTRACTED",
-        "Policy data extracted from document",
-        transaction_id,
-        result,
-        200,
-        processing_mode="immediate",
-    )
+        logger.error(f"Error processing transfer confirmation: {str(e)}")
+        return create_error_response(
+            "INTERNAL_ERROR",
+            "Internal server error occurred",
+            500
+        )
 
 
 @BP.route('/query-status/<transaction_id>', methods=['GET'])
 def query_status(transaction_id):
     """
-    Query transaction status
+    Query transaction status.
     Retrieve current status and history for a specific transaction from distributor tables.
+
+    Unified API endpoint.
     """
     try:
         # Validate UUID format
