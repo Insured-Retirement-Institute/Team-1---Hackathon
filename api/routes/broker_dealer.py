@@ -523,13 +523,13 @@ def trigger_policy_inquiry():
     DTCC/IIEX.  Enqueues an SQS message; the sqs-policy-inquiry Lambda
     handles the actual API call, DB update, and EventBridge notification.
 
-    Required header:  transactionId (UUID)
+    Required header:  requestId (ULID, per spec v0.1.1)
     Required body:    requestingFirm, client  (per PolicyInquiryRequest schema)
     Returns:          202 with code=QUEUED
     """
-    transaction_id, error = validate_transaction_id(request.headers)
-    if error:
-        return error
+    request_id = request.headers.get("requestId") or request.headers.get("requestid")
+    if not request_id:
+        return create_error_response("MISSING_HEADER", "requestId header is required", 400)
 
     data = request.get_json(silent=True)
     if not data:
@@ -552,7 +552,7 @@ def trigger_policy_inquiry():
         )
 
     message = {
-        "transactionId": transaction_id,
+        "requestId": request_id,
         "action": "POLICY_INQUIRY",
         "requestData": data,
         "timestamp": get_timestamp(),
@@ -568,14 +568,14 @@ def trigger_policy_inquiry():
             },
         )
     except Exception as e:
-        logger.error("Failed to enqueue policy inquiry — transactionId=%s: %s", transaction_id, e)
+        logger.error("Failed to enqueue policy inquiry — requestId=%s: %s", request_id, e)
         return create_error_response("QUEUE_ERROR", "Failed to enqueue policy inquiry request", 500)
 
-    logger.info("Policy inquiry enqueued — transactionId=%s", transaction_id)
+    logger.info("Policy inquiry enqueued — requestId=%s", request_id)
     return create_response(
         "QUEUED",
         "Policy inquiry request queued for processing",
-        transaction_id,
+        request_id,
         status_code=202,
         processing_mode="deferred",
         estimated_response_time="PT30S",
@@ -589,24 +589,24 @@ def trigger_transfer_request():
 
     Called by the UI (button click) to initiate a broker-dealer change.
     Enqueues an SQS message; the sqs-bd-change Lambda handles the actual
-    /bd-change API call, DB update, and EventBridge notification.
-    The async carrier/IIEX response arrives later via the
+    /servicing-agent-changes/create API call, DB update, and EventBridge
+    notification.  The async carrier response arrives later via the
     api-bd-change-callback Lambda endpoint.
 
-    Required header:  transactionId (UUID)
-    Required body:    receivingBrokerId, deliveringBrokerId, carrierId,
-                      policyNumber  (per BdChangeRequest schema)
+    Required header:  requestId (ULID, per spec v0.1.1)
+    Required body:    requestingFirm, carrier, client
+                      (per ServicingAgentChangeRequest schema v0.1.1)
     Returns:          202 with code=QUEUED
     """
-    transaction_id, error = validate_transaction_id(request.headers)
-    if error:
-        return error
+    request_id = request.headers.get("requestId") or request.headers.get("requestid")
+    if not request_id:
+        return create_error_response("MISSING_HEADER", "requestId header is required", 400)
 
     data = request.get_json(silent=True)
     if not data:
         return create_error_response("INVALID_PAYLOAD", "JSON request body is required", 400)
 
-    required = ["receivingBrokerId", "deliveringBrokerId", "carrierId", "policyNumber"]
+    required = ["requestingFirm", "carrier", "client"]
     missing = [f for f in required if not data.get(f)]
     if missing:
         return create_error_response(
@@ -624,7 +624,7 @@ def trigger_transfer_request():
         )
 
     message = {
-        "transactionId": transaction_id,
+        "requestId": request_id,
         "action": "BD_CHANGE",
         "requestData": data,
         "timestamp": get_timestamp(),
@@ -640,14 +640,14 @@ def trigger_transfer_request():
             },
         )
     except Exception as e:
-        logger.error("Failed to enqueue BD change — transactionId=%s: %s", transaction_id, e)
+        logger.error("Failed to enqueue BD change — requestId=%s: %s", request_id, e)
         return create_error_response("QUEUE_ERROR", "Failed to enqueue transfer request", 500)
 
-    logger.info("BD change enqueued — transactionId=%s", transaction_id)
+    logger.info("BD change enqueued — requestId=%s", request_id)
     return create_response(
         "QUEUED",
         "Transfer request queued for processing",
-        transaction_id,
+        request_id,
         status_code=202,
         processing_mode="deferred",
         estimated_response_time="PT5M",

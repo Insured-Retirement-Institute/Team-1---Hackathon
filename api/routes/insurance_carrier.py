@@ -65,7 +65,7 @@ Response payload (carrier_determination.schema.json) wrapped in StandardResponse
 """
 
 from flask import request, jsonify, Blueprint
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 import sys
 import uuid
 import json
@@ -991,3 +991,146 @@ def query_status(requestId):
     except Exception as e:
         logger.error("Error querying request status: %s", str(e))
         return create_error_response("INTERNAL_ERROR", "Internal server error occurred", 500)
+
+
+# ── Servicing Agent Change Reply (async callback) ───────────────────────────────
+
+REPLY_TABLE = "transact"
+REPLY_SK = "SERVICING_AGENT_CHANGE_REPLY"
+VALID_POLICY_STATUSES = {"approved", "rejected", "pendingAppointment"}
+
+
+def _get_reply_table():
+    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+    return dynamodb.Table(REPLY_TABLE)
+
+
+@BP.route('/servicing-agent-changes/reply', methods=['POST'], strict_slashes=False)
+def servicing_agent_change_reply():
+    """
+    POST /servicing-agent-changes/reply
+    Accept async ServicingAgentChangeResponse callback from the carrier.
+    This is Step 5 of the servicing agent change process per spec v0.1.1.
+
+    Headers:
+      requestId    (required, ULID)
+      correlationId (optional)
+
+    Body: ServicingAgentChangeResponse schema
+      requestId  string  required
+      carrier    object  required  { carrierName, carrierId }
+      policies   array   required  list of PolicyStatus
+      context    string  optional
+    """
+    headers = request.headers
+    request_id = headers.get("requestId") or headers.get("requestid")
+    if not request_id:
+        return create_error_response("MISSING_HEADER", "requestId header is required", 400)
+
+    correlation_id = headers.get("correlationId") or headers.get("correlationid")
+
+    try:
+        data = request.get_json()
+        if not data:
+            return create_error_response("INVALID_PAYLOAD", "Request body is required", 400)
+    except Exception:
+        return create_error_response("INVALID_PAYLOAD", "Request body must be valid JSON", 400)
+
+    # Validate required fields per ServicingAgentChangeResponse schema
+    if not data.get("carrier"):
+        return create_error_response("VALIDATION_ERROR", "carrier is required", 400)
+    policies = data.get("policies")
+    if not policies or not isinstance(policies, list):
+        return create_error_response("VALIDATION_ERROR", "policies array is required", 400)
+    for p in policies:
+        if not p.get("policyNumber"):
+            return create_error_response("VALIDATION_ERROR", "Each policy must have a policyNumber", 400)
+        if p.get("status") not in VALID_POLICY_STATUSES:
+            return create_error_response(
+                "VALIDATION_ERROR",
+                f"Policy status must be one of: {', '.join(sorted(VALID_POLICY_STATUSES))}",
+                400,
+            )
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    try:
+        table = _get_reply_table()
+        table.put_item(Item={
+            "pk": request_id,
+            "sk": REPLY_SK,
+            "requestId": request_id,
+            "correlationId": correlation_id,
+            "carrier": data.get("carrier"),
+            "policies": policies,
+            "context": data.get("context"),
+            "receivedAt": now,
+        })
+    except Exception as e:
+        logger.error("Error storing servicing agent change reply: %s", str(e))
+        return create_error_response("INTERNAL_ERROR", "Internal server error occurred", 500)
+
+    logger.info(
+        "Servicing agent change reply stored — requestId=%s policies=%d",
+        request_id, len(policies),
+    )
+
+    resp = jsonify({
+        "code": "RECEIVED",
+        "message": "Servicing agent change response received successfully",
+        "requestId": request_id,
+    })
+    resp.status_code = 200
+    if correlation_id:
+        resp.headers["correlationId"] = correlation_id
+    return resp
+
+
+@BP.route('/servicing-agent-changes', methods=['GET'], strict_slashes=False)
+def list_servicing_agent_change_replies():
+    """
+    GET /servicing-agent-changes
+    List all received ServicingAgentChangeResponse callbacks.
+    """
+    try:
+        dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+        table = dynamodb.Table(REPLY_TABLE)
+        result = table.scan(
+            FilterExpression=Attr("sk").eq(REPLY_SK)
+        )
+        items = result.get("Items", [])
+        while "LastEvaluatedKey" in result:
+            result = table.scan(
+                FilterExpression=Attr("sk").eq(REPLY_SK),
+                ExclusiveStartKey=result["LastEvaluatedKey"],
+            )
+            items.extend(result.get("Items", []))
+    except Exception as e:
+        logger.error("Error listing servicing agent change replies: %s", str(e))
+        return create_error_response("INTERNAL_ERROR", "Internal server error occurred", 500)
+
+    return jsonify({"replies": items, "count": len(items)}), 200
+
+
+@BP.route('/servicing-agent-changes/<request_id>', methods=['GET'], strict_slashes=False)
+def get_servicing_agent_change_reply(request_id):
+    """
+    GET /servicing-agent-changes/{requestId}
+    Retrieve a specific ServicingAgentChangeResponse by requestId.
+    """
+    try:
+        table = _get_reply_table()
+        result = table.get_item(Key={"pk": request_id, "sk": REPLY_SK})
+        item = result.get("Item")
+    except Exception as e:
+        logger.error("Error fetching servicing agent change reply: %s", str(e))
+        return create_error_response("INTERNAL_ERROR", "Internal server error occurred", 500)
+
+    if not item:
+        return create_error_response(
+            "NOT_FOUND",
+            f"No servicing agent change reply found for requestId: {request_id}",
+            404,
+        )
+
+    return jsonify(item), 200

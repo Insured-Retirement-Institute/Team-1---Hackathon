@@ -27,13 +27,28 @@ from datetime import datetime, timezone
 import boto3
 from boto3.dynamodb.conditions import Key
 
+_ULID_ENCODING = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+
+
+def _generate_ulid() -> str:
+    """Generate a ULID — no external dependencies required."""
+    t = int(time.time() * 1000)
+    r = int.from_bytes(os.urandom(10), "big")
+    chars = []
+    for _ in range(16):
+        chars.append(_ULID_ENCODING[r & 0x1F])
+        r >>= 5
+    for _ in range(10):
+        chars.append(_ULID_ENCODING[t & 0x1F])
+        t >>= 5
+    return "".join(reversed(chars))
+
+
 # Initialize DynamoDB
 dynamodb = boto3.resource('dynamodb')
 TABLE_NAME = 'distributor'
 
 SQS_REGION = os.environ.get('SQS_REGION', 'us-east-1')
-
-_ULID_ENCODING = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
 
 def _generate_ulid() -> str:

@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 # Usage:
-#   ./scripts/deploy.sh api-broker-dealer
-#   ./scripts/deploy.sh api-clearinghouse
-#   ./scripts/deploy.sh api-insurance-carrier
+#   ./scripts/deploy.sh api
 #   ./scripts/deploy.sh sqs-policy-inquiry
 #   ./scripts/deploy.sh sqs-bd-change
 #   ./scripts/deploy.sh api-bd-change-callback
@@ -15,9 +13,7 @@ set -euo pipefail
 
 REGION="us-east-1"
 FUNCTIONS=(
-  "api-broker-dealer"
-  "api-clearinghouse"
-  "api-insurance-carrier"
+  "api"
   "sqs-policy-inquiry"
   "sqs-bd-change"
   "api-bd-change-callback"
@@ -26,12 +22,7 @@ FUNCTIONS=(
 deploy_function() {
   local FUNCTION_NAME="$1"
 
-  # Some Lambda function names differ from their source directory
-  local DIR
-  case "$FUNCTION_NAME" in
-    api-broker-dealer) DIR="api" ;;
-    *) DIR="$FUNCTION_NAME" ;;
-  esac
+  local DIR="$FUNCTION_NAME"
 
   if [[ ! -d "$DIR" ]]; then
     echo "ERROR: Directory '$DIR' not found. Run from repo root." >&2
@@ -46,13 +37,19 @@ deploy_function() {
 
   # Source-only functions: rely on Lambda's built-in boto3 / managed layers.
   # Avoids bundling macOS-compiled binaries that break on Amazon Linux.
-  SOURCE_ONLY=("api-broker-dealer" "sqs-policy-inquiry" "sqs-bd-change" "api-bd-change-callback")
+  SOURCE_ONLY=("sqs-policy-inquiry" "sqs-bd-change" "api-bd-change-callback")
   if [[ " ${SOURCE_ONLY[*]} " == *" $FUNCTION_NAME "* ]]; then
     cp -r "$DIR"/. "$TMP_DIR/"
   else
     # Install dependencies and copy source into temp dir
     pip3 install -r "$DIR/requirements.txt" -t "$TMP_DIR" --quiet
     cp -r "$DIR"/. "$TMP_DIR/"
+  fi
+
+  # Include shared lib/ for functions that import from it
+  NEEDS_LIB=("api")
+  if [[ " ${NEEDS_LIB[*]} " == *" $FUNCTION_NAME "* ]]; then
+    cp -r lib "$TMP_DIR/"
   fi
 
   # Create zip (exclude pyc / __pycache__)

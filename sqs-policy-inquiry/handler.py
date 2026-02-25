@@ -24,11 +24,10 @@ AWS_REGION              AWS region                       (default: "us-east-1")
 import json
 import logging
 import os
-import urllib.error
-import urllib.request
 from datetime import datetime, timezone
 
 import boto3
+import urllib3
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -54,29 +53,30 @@ def _now() -> str:
 # Step 1 – call internal API
 # ---------------------------------------------------------------------------
 
-def call_policy_inquiry_api(transaction_id: str, request_data: dict) -> dict:
-    """POST /policy-inquiry on the internal API and return the parsed response."""
-    url = f"{INTERNAL_API_BASE_URL}/policy-inquiries/create"
-    body_bytes = json.dumps(request_data).encode("utf-8")
+_http = urllib3.PoolManager()
 
-    req = urllib.request.Request(
+
+def call_policy_inquiry_api(transaction_id: str, request_data: dict) -> dict:
+    """POST /policy-inquiries/create on the internal API and return the parsed response."""
+    url = f"{INTERNAL_API_BASE_URL}/policy-inquiries/create"
+
+    resp = _http.request(
+        "POST",
         url,
-        data=body_bytes,
+        body=json.dumps(request_data).encode("utf-8"),
         headers={
             "Content-Type": "application/json",
             "requestId": transaction_id,
         },
-        method="POST",
+        timeout=30,
     )
 
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        raw = exc.read().decode("utf-8") if exc.fp else ""
+    if resp.status >= 400:
         raise RuntimeError(
-            f"Policy inquiry API returned HTTP {exc.code}: {raw}"
-        ) from exc
+            f"Policy inquiry API returned HTTP {resp.status}: {resp.data.decode('utf-8')}"
+        )
+
+    return json.loads(resp.data.decode("utf-8"))
 
 
 # ---------------------------------------------------------------------------

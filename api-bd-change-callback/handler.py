@@ -223,6 +223,6 @@ def handler(event: dict, context) -> dict:
 
     return _response(200, {
         "code": "RECEIVED",
-        "message": f"BD change callback processed — result: {validation_result}",
+        "message": f"BD change callback processed — result: {new_status}",
         "transactionId": transaction_id,
     })

@@ -45,7 +45,7 @@ def create_response(
     response = {
         "code": code,
         "message": message,
-        "transactionId": transaction_id
+        "requestId": transaction_id
     }
     if payload is not None:
         response["payload"] = payload

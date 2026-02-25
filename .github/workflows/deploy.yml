@@ -1,0 +1,75 @@
+name: Deploy Lambda Functions
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'api-broker-dealer/**'
+      - 'api-clearinghouse/**'
+      - 'api-insurance-carrier/**'
+  workflow_dispatch:  # allow manual trigger from GitHub UI
+
+env:
+  AWS_REGION: us-east-1
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  deploy:
+    name: Deploy ${{ matrix.function.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false      # deploy all three even if one fails
+      matrix:
+        function:
+          - name: api-broker-dealer
+            dir: api-broker-dealer
+            handler: app.lambda_handler
+          - name: api-clearinghouse
+            dir: api-clearinghouse
+            handler: app.lambda_handler
+          - name: api-insurance-carrier
+            dir: api-insurance-carrier
+            handler: app.lambda_handler
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token:     ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region:            ${{ env.AWS_REGION }}
+
+      - name: Package ${{ matrix.function.name }}
+        run: |
+          cd ${{ matrix.function.dir }}
+          pip install -r requirements.txt -t ./package --quiet
+          cp -r . ./package/
+          cd package
+          zip -r ../../${{ matrix.function.name }}.zip . -x "*.pyc" -x "*/__pycache__/*"
+          cd ../..
+          echo "Package size: $(du -sh ${{ matrix.function.name }}.zip | cut -f1)"
+
+      - name: Deploy ${{ matrix.function.name }} to Lambda
+        run: |
+          aws lambda update-function-code \
+            --function-name ${{ matrix.function.name }} \
+            --zip-file fileb://${{ matrix.function.name }}.zip \
+            --region ${{ env.AWS_REGION }} \
+            --output text \
+            --query 'FunctionArn'
+
+      - name: Wait for update to complete
+        run: |
+          aws lambda wait function-updated \
+            --function-name ${{ matrix.function.name }} \
+            --region ${{ env.AWS_REGION }}
+          echo "✓ ${{ matrix.function.name }} deployed successfully"
