@@ -85,7 +85,10 @@ def internal_error(e):
 
 def handler(event, context):
     event = normalize_lambda_event(event)
-    return serverless_wsgi.handle_request(app, event, context)
+    import awsgi
+    return awsgi.response(app, event, context)
+
+    # return serverless_wsgi.handle_request(app, event, context)
 
 
 if __name__ == '__main__':

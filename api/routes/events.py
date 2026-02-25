@@ -5,11 +5,16 @@ Receives EventBridge events via POST and streams them to listeners via GET (SSE)
 
 import json
 import logging
+import os
 import queue
 import threading
 import time
 from datetime import datetime, timezone
 from flask import Blueprint, Response, jsonify, request, stream_with_context
+
+# AWS Lambda does not support long-lived streaming connections.
+# When running on Lambda, GET /api/events returns stored events as JSON.
+_IS_LAMBDA = bool(os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
 
 BP = Blueprint("events", __name__)
 
@@ -79,7 +84,6 @@ def receive_event():
 
 
 # ---- GET /api/events --------------------------------------------------------
-
 @BP.route("/", methods=["GET"])
 def stream_events():
     """
@@ -92,7 +96,17 @@ def stream_events():
     Query parameters:
         replay (bool, default true) – send all stored events on connect before
                                       switching to live streaming.
+
+    On AWS Lambda, streaming is not supported.  The endpoint instead returns
+    the buffered events as a plain JSON array so callers can poll.
     """
+    # Lambda: streaming hangs because API Gateway terminates the connection.
+    # Return stored events immediately as JSON so clients can poll.
+    if _IS_LAMBDA:
+        with _events_lock:
+            buffered = list(_events)
+        return jsonify(buffered), 200
+
     replay = request.args.get("replay", "true").lower() != "false"
     client_queue: queue.Queue = queue.Queue(maxsize=50)
 
@@ -129,6 +143,7 @@ def stream_events():
         mimetype="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",   # disable nginx buffering if behind a proxy
+            "X-Accel-Buffering": "no",
+            'Connection': 'keep-alive'
         },
     )
