@@ -31,22 +31,9 @@ onChange(async files => {
 	await new Promise(resolve => setTimeout(resolve, 5_000))
 
 	loader.close()
-	searchContracts.value.push(
-		{
-			contractNumber: '45345345236',
-			id: '',
-			carrierName: '',
-			productName: '',
-			cusipNumber: '',
-			ownership: '',
-			trailing: false,
-			contractStatus: ContractStatus.Active,
-			withdrawalProgram: false
-		},
-		{
-			contractNumber: '3453645645'
-		}
-	)
+	searchContracts.value = []
+	contractResultsStore.addSearchContract({ contractNumber: '43573928457' })
+	contractResultsStore.addSearchContract({ contractNumber: '549384578932' })
 })
 </script>
 

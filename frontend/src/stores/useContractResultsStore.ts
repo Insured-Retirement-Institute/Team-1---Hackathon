@@ -224,8 +224,12 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 		}
 	}
 
-	function addSearchContract() {
-		searchContracts.value.push(createEmptyContract())
+	function addSearchContract(options: Partial<ContractRecord> = {}) {
+		const contract = createEmptyContract()
+		searchContracts.value.push({
+			...contract,
+			...options
+		})
 	}
 
 	function removeSearchContract(id: string | number) {
