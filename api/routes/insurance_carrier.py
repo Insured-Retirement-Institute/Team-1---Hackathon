@@ -1,18 +1,88 @@
 """
-Insurance Carrier API Flask Application
-Implements the OpenAPI specification for insurance carrier endpoints
+Insurance Carrier API — Blueprint for /api/insurance-carriers/*
+
+Key endpoint: POST /api/insurance-carriers/receive-bd-change-request
+
+This endpoint receives a servicing-agent change request from the clearinghouse or
+broker-dealer, dispatches it synchronously to the Amazon Bedrock AgentCore carrier
+validation agent, and returns a structured IGO/NIGO determination.
+
+The AgentCore agent (iri_producer_change_agent) performs the following steps:
+  1. Looks up each policy in the carrier DynamoDB table by contract number.
+  2. Evaluates all 9 business rules against the inbound request data.
+  3. Returns a structured JSON determination that includes per-rule results,
+     deficiency codes, corrective actions, and a plain-language summary.
+
+Request payload (carrier_change_request.schema.json):
+  {
+    "request-id": "uuid",                       # echoed back in response
+    "submission-date": "YYYY-MM-DD",
+    "client": {
+      "ssn": "...",
+      "client-name": "...",
+      "contract-numbers": ["ATH-100053"]
+    },
+    "receiving-agent": {
+      "npn": "...",
+      "agent-name": "...",
+      "status": "ACTIVE",                       # ACTIVE | SUSPENDED | TERMINATED | INACTIVE
+      "carrier-appointed": true,
+      "e-o-coverage": true,
+      "licensed-states": ["TX", "CA"]
+    },
+    "receiving-broker": {
+      "broker-id": "...",
+      "broker-name": "...",
+      "crd-number": "...",
+      "status": "ACTIVE",                       # ACTIVE | SUSPENDED | TERMINATED
+      "contracted-with-carrier": true
+    },
+    "signatures": {
+      "client-signed": true,
+      "bd-authorized-signed": true,
+      "signature-date": "YYYY-MM-DD"
+    }
+  }
+
+Response payload (carrier_determination.schema.json) wrapped in StandardResponse:
+  {
+    "code": "APPROVED" | "REJECTED" | "ERROR",
+    "message": "...",
+    "transactionId": "...",
+    "processingMode": "immediate",
+    "payload": {
+      "request-id": "...",
+      "determination": "IGO" | "NIGO",
+      "ruleset-version": "1.0.0",
+      "evaluated-at": "ISO-8601 timestamp",
+      "policies-evaluated": [...],
+      "rule-results": [...],
+      "deficiencies": [...],
+      "corrective-actions": [...],
+      "summary": "..."
+    }
+  }
 """
 
 from flask import request, jsonify, Blueprint
-from datetime import datetime
+from datetime import datetime, date
 import uuid
+import json
 import logging
+from urllib.request import urlopen, Request as URLRequest
+from urllib.parse import quote
+from urllib.error import HTTPError, URLError
+from botocore.auth import SigV4Auth
+from botocore.awsrequest import AWSRequest
+import boto3
 from helpers import (create_response,
                      create_error_response,
                      validate_transaction_id)
 from dynamodb_utils import get_item, scan_items, Attr
 
-BP = Blueprint('insurance-carrier', __name__)
+# Blueprint registered at /api/insurance-carriers (plural, per spec)
+BP = Blueprint('insurance-carriers', __name__)
+URL_PREFIX = "/api/insurance-carriers"
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -26,10 +96,11 @@ CARRIER_TABLES = {
 }
 
 # Carrier-specific configurations for direct carrier endpoints
+# Policy numbers are stored without prefix in carrier-specific tables
 CARRIER_CONFIGS = {
-    "athene": {"table": "carrier", "carrierName": "Athene", "prefix": "ATH"},
-    "paclife": {"table": "carrier-2", "carrierName": "Pacific Life", "prefix": "PAC"},
-    "prudential": {"table": "carrier-3", "carrierName": "Prudential", "prefix": "PRU"},
+    "athene": {"table": "carrier", "carrierName": "Athene", "carrierId": "ATH1"},
+    "paclife": {"table": "carrier-2", "carrierName": "Pacific Life", "carrierId": "PAC1"},
+    "prudential": {"table": "carrier-3", "carrierName": "Prudential", "carrierId": "PRU1"},
 }
 
 # Value mappings from carrier DB format to API spec format
@@ -53,6 +124,91 @@ POLICY_STATUS_MAP = {
     "Death Claim Pending": "death claim pending",
 }
 
+
+# ── AgentCore dispatch helpers ──────────────────────────────────────────────────
+
+def _strip_fences(text: str) -> str:
+    """Strip markdown code fences the LLM sometimes adds around JSON output."""
+    text = text.strip()
+    if text.startswith("```"):
+        lines = text.split("\n")
+        lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    return text
+
+
+def _call_carrier_agent(payload: dict) -> dict:
+    """
+    Invoke the AgentCore carrier validation agent via SigV4-signed HTTP POST.
+
+    Uses botocore (always present in the Lambda runtime) for request signing —
+    no custom boto3 service model is required.
+
+    The agent is invoked with a fresh session ID per request so each
+    determination is stateless and independent.
+
+    Args:
+        payload: Carrier agent input dict matching carrier_change_request.schema.json.
+
+    Returns:
+        Parsed JSON determination dict matching carrier_determination.schema.json,
+        or an error dict with keys "error" (and optionally "message"/"raw").
+    """
+    session = boto3.Session()
+    creds = session.get_credentials().get_frozen_credentials()
+
+    session_id = str(uuid.uuid4())
+    encoded_arn = quote(AGENT_ARN, safe="")
+    url = f"https://{AGENT_HOST}/runtimes/{encoded_arn}/invocations?qualifier=DEFAULT"
+    body_bytes = json.dumps(payload).encode("utf-8")
+
+    # Build and SigV4-sign the request using botocore primitives
+    aws_request = AWSRequest(
+        method="POST",
+        url=url,
+        data=body_bytes,
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            # Each invocation gets a unique session so state is never shared
+            "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id": session_id,
+        },
+    )
+    SigV4Auth(creds, "bedrock-agentcore", AGENT_REGION).add_auth(aws_request)
+
+    req = URLRequest(url, data=body_bytes, headers=dict(aws_request.headers), method="POST")
+
+    try:
+        with urlopen(req, timeout=300) as resp:
+            raw = resp.read().decode("utf-8")
+    except HTTPError as e:
+        error_body = e.read().decode("utf-8", errors="replace")
+        logger.error("AgentCore HTTP %s: %s", e.code, error_body)
+        return {"error": f"AgentCore HTTP {e.code}", "message": error_body}
+    except URLError as e:
+        logger.error("AgentCore connection error: %s", e)
+        return {"error": "AgentCore connection error", "message": str(e)}
+    except Exception as e:
+        logger.error("Unexpected error calling AgentCore: %s", e, exc_info=True)
+        return {"error": "AgentCore invocation failed", "message": str(e)}
+
+    # Response may arrive as SSE ("data: {...}" lines) or plain JSON.
+    # Handle both defensively.
+    lines = raw.splitlines()
+    data_lines = [ln[6:] for ln in lines if ln.startswith("data: ")]
+    raw = "".join(data_lines).strip() if data_lines else raw.strip()
+    raw = _strip_fences(raw)
+
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        logger.error("Non-JSON agent response (first 500 chars): %s", raw[:500])
+        return {"error": "Agent returned non-JSON response", "raw": raw[:500]}
+
+
+# ── Policy inquiry helpers (unchanged) ─────────────────────────────────────────
 
 def get_carrier_table(policy_number: str) -> tuple:
     """
@@ -91,6 +247,7 @@ def lookup_policy(policy_number: str) -> dict:
 def lookup_policy_from_table(policy_number: str, table_name: str, carrier_name: str) -> dict:
     """
     Look up a policy from a specific carrier table.
+    Policy numbers are stored without carrier prefix.
     Returns the policy record or None if not found.
     """
     policy = get_item(
@@ -110,14 +267,12 @@ def format_policy_for_response(policy: dict, client_ssn: str = None) -> dict:
     """
     errors = []
 
-    # Check SSN match if provided
     if client_ssn and policy.get("ownerSSN") != client_ssn:
         errors.append({
             "errorCode": "ssnContractMismatch",
             "message": "Client's SSN does not match the contract on file"
         })
 
-    # Check policy status
     policy_status = policy.get("policyStatus", "Active")
     if policy_status != "Active":
         errors.append({
@@ -147,12 +302,10 @@ def validate_producer(agent_name: str, npn: str) -> list:
     Validate producer licensing and appointments.
     For hackathon demo, always returns valid (empty errors).
     """
-    # In production, this would check:
-    # - Producer is licensed in the relevant state
-    # - Producer is appointed with the carrier
-    # - Producer affiliation matches the requesting firm
     return []
 
+
+# ── Route handlers ──────────────────────────────────────────────────────────────
 
 @BP.route('/health', methods=['GET'])
 def health_check():
@@ -179,7 +332,6 @@ def _process_carrier_policy_inquiry(carrier_key: str):
 
     table_name = carrier_config["table"]
     carrier_name = carrier_config["carrierName"]
-    expected_prefix = carrier_config["prefix"]
 
     transaction_id, error = validate_transaction_id(request.headers)
     if error:
@@ -222,18 +374,7 @@ def _process_carrier_policy_inquiry(carrier_key: str):
         ssn_last4 = client_ssn[-4:] if client_ssn and len(client_ssn) >= 4 else None
 
         for policy_number in policy_numbers:
-            # Validate policy belongs to this carrier
-            if not policy_number.startswith(expected_prefix):
-                policies.append({
-                    "policyNumber": policy_number,
-                    "carrierName": carrier_name,
-                    "errors": [{
-                        "errorCode": "wrongCarrier",
-                        "message": f"Policy {policy_number} does not belong to {carrier_name}"
-                    }]
-                })
-                continue
-
+            # Look up policy directly (no prefix validation needed)
             policy = lookup_policy_from_table(policy_number, table_name, carrier_name)
             if policy:
                 if not client_name_from_db:
@@ -342,47 +483,29 @@ def policy_inquiry():
     try:
         data = request.get_json()
         if not data:
-            return create_error_response(
-                "INVALID_PAYLOAD",
-                "Request body is required",
-                400
-            )
+            return create_error_response("INVALID_PAYLOAD", "Request body is required", 400)
 
-        # Validate required fields per PolicyInquiryRequest schema
         if 'requestingFirm' not in data:
-            return create_error_response(
-                "VALIDATION_ERROR",
-                "Missing required field: requestingFirm",
-                400
-            )
+            return create_error_response("VALIDATION_ERROR", "Missing required field: requestingFirm", 400)
         if 'client' not in data:
-            return create_error_response(
-                "VALIDATION_ERROR",
-                "Missing required field: client",
-                400
-            )
+            return create_error_response("VALIDATION_ERROR", "Missing required field: client", 400)
 
         requesting_firm = data.get('requestingFirm', {})
         client = data.get('client', {})
         servicing_agent = requesting_firm.get('servicingAgent', {})
 
-        logger.info(f"Received policy inquiry request - Transaction ID: {transaction_id}")
-        logger.info(f"Requesting Firm: {requesting_firm.get('firmName')}")
-        logger.info(f"Agent: {servicing_agent.get('agentName')}")
-        logger.info(f"Client: {client.get('clientName')}")
-        logger.info(f"Policy Numbers: {client.get('policyNumbers', [])}")
+        logger.info("Policy inquiry - Transaction: %s, Firm: %s, Policies: %s",
+                    transaction_id, requesting_firm.get('firmName'),
+                    client.get('policyNumbers', []))
 
-        # Extract request data
         client_ssn = client.get('ssn')
         policy_numbers = client.get('policyNumbers', [])
 
-        # Validate producer (licensing, appointments)
         producer_errors = validate_producer(
             servicing_agent.get('agentName'),
             servicing_agent.get('npn')
         )
 
-        # Look up policies from carrier tables
         policies = []
         client_name_from_db = None
         ssn_last4 = client_ssn[-4:] if client_ssn and len(client_ssn) >= 4 else None
@@ -390,17 +513,12 @@ def policy_inquiry():
         for policy_number in policy_numbers:
             policy = lookup_policy(policy_number)
             if policy:
-                # Capture client name from first found policy
                 if not client_name_from_db:
                     client_name_from_db = policy.get('clientName')
-                    # Get SSN last 4 from DB if not provided in request
                     if not ssn_last4 and policy.get('ownerSSN'):
                         ssn_last4 = policy.get('ownerSSN')[-4:]
-
-                formatted_policy = format_policy_for_response(policy, client_ssn)
-                policies.append(formatted_policy)
+                policies.append(format_policy_for_response(policy, client_ssn))
             else:
-                # Policy not found - add error entry
                 policies.append({
                     "policyNumber": policy_number,
                     "carrierName": None,
@@ -412,13 +530,10 @@ def policy_inquiry():
                     "trailingCommission": False,
                     "contractStatus": None,
                     "withdrawalStructure": {"systematicInPlace": False},
-                    "errors": [{
-                        "errorCode": "policyNotFound",
-                        "message": f"Policy {policy_number} not found in carrier records"
-                    }]
+                    "errors": [{"errorCode": "policyNotFound",
+                                "message": f"Policy {policy_number} not found in carrier records"}]
                 })
 
-        # Build PolicyInquiryResponse payload
         response_payload = {
             "requestingFirm": {
                 "firmName": requesting_firm.get('firmName'),
@@ -444,26 +559,13 @@ def policy_inquiry():
             }
         }
 
-        logger.info(
-            f"Returning {len(policies)} policies for transaction {transaction_id}")
-
-        # Return immediate response with policy data
-        return create_response(
-            "IMMEDIATE",
-            "Policy inquiry processed successfully",
-            transaction_id,
-            response_payload,
-            200,
-            processing_mode="immediate"
-        )
+        logger.info("Returning %d policies for transaction %s", len(policies), transaction_id)
+        return create_response("IMMEDIATE", "Policy inquiry processed successfully",
+                               transaction_id, response_payload, 200, processing_mode="immediate")
 
     except Exception as e:
-        logger.error(f"Error processing policy inquiry request: {str(e)}")
-        return create_error_response(
-            "INTERNAL_ERROR",
-            "Internal server error occurred",
-            500
-        )
+        logger.error("Error processing policy inquiry request: %s", str(e))
+        return create_error_response("INTERNAL_ERROR", "Internal server error occurred", 500)
 
 
 @BP.route('/policy-inquiry-callback', methods=['POST'])
@@ -483,15 +585,10 @@ def policy_inquiry_callback():
     try:
         data = request.get_json()
         if not data:
-            return create_error_response(
-                "INVALID_PAYLOAD",
-                "Request body is required",
-                400
-            )
+            return create_error_response("INVALID_PAYLOAD", "Request body is required", 400)
 
-        # Validate required fields per PolicyInquiryResponse schema
         required_fields = ['requestingFirm', 'producerValidation', 'client', 'enums']
-        missing_fields = [field for field in required_fields if field not in data]
+        missing_fields = [f for f in required_fields if f not in data]
         if missing_fields:
             return create_error_response(
                 "VALIDATION_ERROR",
@@ -499,31 +596,13 @@ def policy_inquiry_callback():
                 400
             )
 
-        logger.info(
-            f"Submitting policy inquiry response - Transaction ID: {transaction_id}")
-        logger.info(f"Client: {data.get('client', {}).get('clientName')}")
-        logger.info(f"Policies count: {len(data.get('client', {}).get('policies', []))}")
-
-        # TODO: Forward response to clearinghouse
-        # - Validate response structure
-        # - Send to clearinghouse endpoint
-        # - Update transaction status
-
-        return create_response(
-            "RECEIVED",
-            "Policy inquiry response submitted successfully",
-            transaction_id,
-            None,
-            200
-        )
+        logger.info("Policy inquiry response submitted - Transaction: %s", transaction_id)
+        return create_response("RECEIVED", "Policy inquiry response submitted successfully",
+                               transaction_id, None, 200)
 
     except Exception as e:
-        logger.error(f"Error submitting policy inquiry response: {str(e)}")
-        return create_error_response(
-            "INTERNAL_ERROR",
-            "Internal server error occurred",
-            500
-        )
+        logger.error("Error submitting policy inquiry response: %s", str(e))
+        return create_error_response("INTERNAL_ERROR", "Internal server error occurred", 500)
 
 
 @BP.route('/bd-change', methods=['POST'])
@@ -547,16 +626,11 @@ def bd_change():
     try:
         data = request.get_json()
         if not data:
-            return create_error_response(
-                "INVALID_PAYLOAD",
-                "Request body is required",
-                400
-            )
+            return create_error_response("INVALID_PAYLOAD", "Request body is required", 400)
 
-        # Validate required fields
-        required_fields = ['receivingBrokerId',
-                           'deliveringBrokerId', 'carrierId', 'policyNumber']
-        missing_fields = [field for field in required_fields if field not in data]
+        # Validate spec-required BdChangeRequest fields
+        required_fields = ['receivingBrokerId', 'deliveringBrokerId', 'carrierId', 'policyNumber']
+        missing_fields = [f for f in required_fields if not data.get(f)]
         if missing_fields:
             return create_error_response(
                 "VALIDATION_ERROR",
@@ -564,53 +638,114 @@ def bd_change():
                 400
             )
 
+        broker_details = data.get('brokerDetails', {})
+        policy_number = data.get('policyNumber', '')
+        today = date.today().isoformat()
+
+        # Build carrier agent payload from spec's BdChangeRequest format.
+        # brokerDetails contains the receiving agent validation fields;
+        # top-level fields contain signature and client info.
+        license_state = broker_details.get('licenseState')
+        licensed_states = (
+            broker_details.get('licensedStates')       # preferred: list
+            or ([license_state] if license_state else [])  # fallback: single string
+        )
+
+        carrier_payload = {
+            "request-id": data.get('requestId', transaction_id),
+            "submission-date": data.get('submissionDate', today),
+            "client": {
+                "ssn": data.get('clientSSN', data.get('ssn', '')),
+                "client-name": data.get('clientName', ''),
+                "contract-numbers": [policy_number] if policy_number else [],
+            },
+            "receiving-agent": {
+                "npn": broker_details.get('npn', ''),
+                "agent-name": broker_details.get('agentName', ''),
+                "status": broker_details.get('agentStatus', 'ACTIVE'),
+                "carrier-appointed": broker_details.get('carrierAppointed', True),
+                "e-o-coverage": broker_details.get('eoInPlace', True),
+                "licensed-states": licensed_states,
+            },
+            "receiving-broker": {
+                "broker-id": data.get('receivingBrokerId', ''),
+                "broker-name": broker_details.get('firmName', ''),
+                "status": data.get('brokerStatus', 'ACTIVE'),
+                "contracted-with-carrier": data.get('contractedWithCarrier', True),
+            },
+            "signatures": {
+                "client-signed": data.get('clientSigned', True),
+                "bd-authorized-signed": data.get('bdAuthorizedSigned', True),
+                "signature-date": data.get('signatureDate', today),
+            },
+        }
+
         logger.info(
-            f"Received BD change validation request - Transaction ID: {transaction_id}")
-        logger.info(f"Policy Number: {data.get('policyNumber')}")
-        logger.info(f"Receiving Broker: {data.get('receivingBrokerId')}")
-        logger.info(f"Delivering Broker: {data.get('deliveringBrokerId')}")
-        logger.info(f"Carrier: {data.get('carrierId')}")
-
-        # TODO: Perform validation checks:
-        # - Verify agent licensing
-        # - Check carrier appointments
-        # - Validate suitability requirements
-        # - Check policy-specific rules
-        # - Store validation request in database
-
-        # Options for response:
-        # 1. Immediate processing and response
-        # 2. Deferred processing with estimated time
-
-        # For immediate processing (uncomment if applicable):
-        # validation_result = perform_validation(data)
-        # send_validation_response_to_clearinghouse(transaction_id, validation_result)
-        # return create_response(
-        #     "APPROVED",
-        #     "BD change request validated and approved",
-        #     "processing",
-        #     None,
-        #     200
-        # )
-
-        # For deferred processing:
-        return create_response(
-            "RECEIVED",
-            "BD change validation request received and queued for processing",
+            "BD change validation — Transaction: %s, Policy: %s, "
+            "Carrier: %s, Receiving broker: %s, Agent NPN: %s",
             transaction_id,
-            None,
+            policy_number,
+            data.get('carrierId'),
+            data.get('receivingBrokerId'),
+            broker_details.get('npn'),
+        )
+
+        # Dispatch to AgentCore carrier agent for synchronous IGO/NIGO determination
+        logger.info("Dispatching to AgentCore carrier validation agent")
+        determination = _call_carrier_agent(carrier_payload)
+
+        if "error" in determination and "determination" not in determination:
+            logger.error("Carrier agent error: %s", determination)
+            return create_error_response(
+                "AGENT_ERROR",
+                determination.get("error", "Carrier agent invocation failed"),
+                500
+            )
+
+        det_value = determination.get("determination", "")
+        if det_value == "IGO":
+            code = "APPROVED"
+            message = "Servicing agent change approved — all business rules passed"
+        elif det_value == "NIGO":
+            deficiencies = determination.get("deficiencies", [])
+            nigo_codes = ", ".join(d.get("nigo-code", "") for d in deficiencies if d.get("nigo-code"))
+            summary = determination.get("summary", f"Deficiency codes: {nigo_codes}")
+            code = "REJECTED"
+            message = f"Servicing agent change rejected — {summary}"
+        else:
+            code = "RECEIVED"
+            message = "Validation completed"
+
+        logger.info("Determination: %s for transaction %s", det_value, transaction_id)
+
+        return create_response(
+            code,
+            message,
+            transaction_id,
+            determination,   # full IGO/NIGO detail in payload
             200,
-            processing_mode="deferred",
-            estimated_response_time="PT24H"
+            processing_mode="immediate"
         )
 
     except Exception as e:
-        logger.error(f"Error processing BD change request: {str(e)}")
-        return create_error_response(
-            "INTERNAL_ERROR",
-            "Internal server error occurred",
-            500
-        )
+        logger.error("Error processing BD change request: %s", str(e), exc_info=True)
+        return create_error_response("INTERNAL_ERROR", "Internal server error occurred", 500)
+
+
+@BP.route('/bd-change', methods=['POST'])
+def bd_change():
+    """
+    BD change validation endpoint per the Unified Brokerage Transfer API spec.
+
+    This is functionally equivalent to /receive-bd-change-request but uses the
+    unified-brokerage-transfer-api.yaml endpoint name (/bd-change).  Both routes
+    dispatch to the same AgentCore carrier validation agent and accept the same
+    BdChangeRequest payload.
+
+    See /receive-bd-change-request docstring for full field documentation.
+    """
+    # Delegate to the same handler logic — just a different URL per the unified spec.
+    return receive_bd_change_request()
 
 
 @BP.route('/transfer-notification', methods=['POST'])
@@ -628,11 +763,7 @@ def transfer_notification():
     try:
         data = request.get_json()
         if not data:
-            return create_error_response(
-                "INVALID_PAYLOAD",
-                "Request body is required",
-                400
-            )
+            return create_error_response("INVALID_PAYLOAD", "Request body is required", 400)
 
         # Validate required fields per TransferNotification schema
         required_fields = ['notificationType', 'policyNumber']
@@ -654,20 +785,17 @@ def transfer_notification():
                 400
             )
 
-        logger.info(f"Received transfer notification - Transaction ID: {transaction_id}")
-        logger.info(f"Notification Type: {notification_type}")
-        logger.info(f"Policy Number: {data.get('policyNumber')}")
-        logger.info(f"Carrier: {data.get('carrierId')}")
-        logger.info(f"New Broker: {data.get('receivingBrokerId')}")
-        logger.info(f"Previous Broker: {data.get('deliveringBrokerId')}")
-        logger.info(f"Effective Date: {data.get('effectiveDate')}")
+        logger.info(
+            "Transfer notification received — Transaction: %s, Policy: %s, "
+            "Carrier: %s, New Broker: %s, Effective: %s",
+            transaction_id,
+            data.get('policyNumber'),
+            data.get('carrierId'),
+            data.get('receivingBrokerId'),
+            data.get('effectiveDate'),
+        )
 
-        # TODO: Process transfer notification:
-        # - Update policy servicing agent records
-        # - Update commission structures
-        # - Trigger internal workflows
-        # - Send confirmations to stakeholders
-        # - Store notification in database
+        # TODO: Update policy servicing agent records and trigger internal workflows.
 
         return create_response(
             "RECEIVED",
@@ -679,12 +807,8 @@ def transfer_notification():
         )
 
     except Exception as e:
-        logger.error(f"Error processing transfer notification: {str(e)}")
-        return create_error_response(
-            "INTERNAL_ERROR",
-            "Internal server error occurred",
-            500
-        )
+        logger.error("Error processing transfer notification: %s", str(e))
+        return create_error_response("INTERNAL_ERROR", "Internal server error occurred", 500)
 
 
 @BP.route('/bd-change-callback', methods=['POST'])
@@ -818,11 +942,9 @@ def transfer_confirmation():
 @BP.route('/query-status/<transaction_id>', methods=['GET'])
 def query_status(transaction_id):
     """
-    Query transaction status
-    Retrieve current status and history for a specific transaction
+    Query transaction status by transaction ID.
     """
     try:
-        # Validate UUID format
         try:
             uuid.UUID(transaction_id)
         except ValueError:
@@ -832,58 +954,36 @@ def query_status(transaction_id):
                 400
             )
 
-        logger.info(f"Querying status for transaction: {transaction_id}")
+        logger.info("Status query for transaction: %s", transaction_id)
 
-        # TODO: Retrieve from database
-        # For demo purposes, return mock data
-
-        # Simulate not found scenario (can be removed in production)
-        # return create_error_response(
-        #     "NOT_FOUND",
-        #     f"Transaction {transaction_id} not found",
-        #     404
-        # )
-
-        # Mock response
+        # TODO: Retrieve from request-tracking DynamoDB table.
+        # Returning mock data for hackathon demo.
         status_data = {
             "currentStatus": "CARRIER_APPROVED",
-            "createdAt": "2026-02-24T10:30:00Z",
-            "updatedAt": "2026-02-24T11:00:00Z",
+            "createdAt": "2026-02-25T10:30:00Z",
+            "updatedAt": "2026-02-25T11:00:00Z",
             "statusHistory": [
                 {
                     "status": "CARRIER_VALIDATION_PENDING",
-                    "timestamp": "2026-02-24T10:30:00Z",
+                    "timestamp": "2026-02-25T10:30:00Z",
                     "notes": "BD change validation request received from clearinghouse"
                 },
                 {
                     "status": "CARRIER_APPROVED",
-                    "timestamp": "2026-02-24T11:00:00Z",
-                    "notes": "All validation checks passed - approved"
+                    "timestamp": "2026-02-25T11:00:00Z",
+                    "notes": "All 9 business rules passed — IGO determination"
                 }
             ],
             "carrierValidationDetails": {
-                "licensingCheck": "passed",
-                "appointmentCheck": "passed",
-                "suitabilityCheck": "passed",
-                "policyRulesCheck": "passed",
-                "validatedBy": "System Automated Validation",
-                "validationTimestamp": "2026-02-24T11:00:00Z"
+                "validatedBy": "AgentCore carrier agent (iri_producer_change_agent)",
+                "validationTimestamp": "2026-02-25T11:00:00Z"
             },
-            "policiesAffected": ["POL-001"],
-            "additionalData": {
-                "carrier": "CARRIER-PL",
-                "policyNumber": "POL-001",
-                "newBroker": "BROKER-001",
-                "previousBroker": "BROKER-002"
-            }
+            "policiesAffected": [],
+            "additionalData": {}
         }
 
         return jsonify(status_data), 200
 
     except Exception as e:
-        logger.error(f"Error querying transaction status: {str(e)}")
-        return create_error_response(
-            "INTERNAL_ERROR",
-            "Internal server error occurred",
-            500
-        )
+        logger.error("Error querying transaction status: %s", str(e))
+        return create_error_response("INTERNAL_ERROR", "Internal server error occurred", 500)
