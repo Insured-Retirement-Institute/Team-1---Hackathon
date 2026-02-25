@@ -87,9 +87,9 @@ from lib.utils.dynamodb_utils import get_item, scan_items, Attr
 BP = Blueprint('insurance-carriers', __name__)
 URL_PREFIX = "/api/insurance-carriers"
 
-AGENT_ARN = ""
-AGENT_HOST = ""
-AGENT_REGION = ""
+AGENT_ARN = "arn:aws:bedrock-agentcore:us-east-1:762233730742:runtime/iri_producer_change_agent-nLtgj9FbJl"
+AGENT_REGION = "us-east-1"
+AGENT_HOST = f"bedrock-agentcore.{AGENT_REGION}.amazonaws.com"
 
 
 # Configure logging
