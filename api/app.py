@@ -36,8 +36,13 @@ for filename in os.listdir(routes_dir):
         try:
             module = importlib.import_module(module_name)
             if hasattr(module, 'BP'):
-                # Use a convention for url_prefix, e.g., /api/<filename-with-hyphens>
-                url_prefix = f"/api/{filename[:-3].replace('_', '-')}"
+                # Prefer URL_PREFIX defined in the module; fall back to auto-generated
+                # prefix derived from the filename (e.g. broker_dealer → /api/broker-dealer).
+                url_prefix = getattr(
+                    module,
+                    'URL_PREFIX',
+                    f"/api/{filename[:-3].replace('_', '-')}"
+                )
                 app.register_blueprint(module.BP, url_prefix=url_prefix)
         except Exception as e:
             print(f"Failed to import {module_name}: {e}")
