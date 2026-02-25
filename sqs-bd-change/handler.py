@@ -59,7 +59,7 @@ def _now() -> str:
 
 def call_bd_change_api(transaction_id: str, request_data: dict) -> dict:
     """POST /bd-change on the internal API and return the parsed response."""
-    url = f"{INTERNAL_API_BASE_URL}/bd-change"
+    url = f"{INTERNAL_API_BASE_URL}/servicing-agent-changes/create"
     body_bytes = json.dumps(request_data).encode("utf-8")
 
     req = urllib.request.Request(
@@ -67,7 +67,7 @@ def call_bd_change_api(transaction_id: str, request_data: dict) -> dict:
         data=body_bytes,
         headers={
             "Content-Type": "application/json",
-            "transactionId": transaction_id,
+            "requestId": transaction_id,
         },
         method="POST",
     )
@@ -166,7 +166,7 @@ def fire_eventbridge_event(transaction_id: str, verb: str) -> None:
 
 def process_record(record: dict) -> None:
     body = json.loads(record["body"])
-    transaction_id = body["transactionId"]
+    transaction_id = body["requestId"]
     request_data   = body["requestData"]
 
     logger.info("Processing BD change — transactionId=%s", transaction_id)

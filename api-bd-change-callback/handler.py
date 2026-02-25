@@ -15,17 +15,16 @@ Flow
 Request
 -------
 Headers:
-  transactionId  (required, UUID) – identifies the in-flight transaction
+  requestId  (required, ULID) – identifies the in-flight transaction
   correlationId  (optional)
 
-Body (CarrierResponse schema):
-  carrierId        string   required
-  policyNumber     string   required
-  validationResult string   required  enum: approved | rejected
-  rejectionReason  string   optional
-  validationDetails object  optional
-  effectiveDate    string   optional  (ISO 8601 date, if approved)
-  additionalData   object   optional
+Body (ServicingAgentChangeResponse schema v0.1.1):
+  policies         array    required  list of PolicyStatus objects
+    policyNumber   string   required
+    status         string   required  enum: approved | rejected | pendingAppointment
+    errors         array    optional  list of ServicingAgentChangeError objects
+    effectiveDate  string   optional  (ISO 8601 date, if approved)
+  context          string   optional  AI-generated insights
 
 Response
 --------
@@ -54,7 +53,7 @@ TRANSACT_TABLE = os.environ.get("TRANSACT_TABLE", "transact")
 EVENTBRIDGE_BUS_NAME = os.environ.get("EVENTBRIDGE_BUS_NAME", "hackathon-events")
 REGION = os.environ.get("AWS_REGION", "us-east-1")
 
-VALID_RESULTS = {"approved", "rejected"}
+VALID_STATUSES = {"approved", "rejected", "pendingAppointment"}
 
 
 # ---------------------------------------------------------------------------
@@ -168,11 +167,11 @@ def handler(event: dict, context) -> dict:
     if event.get("httpMethod") == "OPTIONS":
         return _response(200, {})
 
-    # --- Extract and validate transaction ID ---
+    # --- Extract and validate request ID (ULID per spec v0.1.1) ---
     headers = {k.lower(): v for k, v in (event.get("headers") or {}).items()}
-    transaction_id = headers.get("transactionid")
+    transaction_id = headers.get("requestid")
     if not transaction_id:
-        return _error("MISSING_HEADER", "transactionId header is required")
+        return _error("MISSING_HEADER", "requestId header is required")
 
     # --- Parse body ---
     try:
@@ -180,34 +179,37 @@ def handler(event: dict, context) -> dict:
     except json.JSONDecodeError:
         return _error("INVALID_PAYLOAD", "Request body must be valid JSON")
 
-    # --- Validate required fields ---
-    required = ["carrierId", "policyNumber", "validationResult"]
-    missing = [f for f in required if not body.get(f)]
-    if missing:
-        return _error(
-            "VALIDATION_ERROR",
-            f"Missing required fields: {', '.join(missing)}",
-        )
+    # --- Validate required fields (ServicingAgentChangeResponse schema v0.1.1) ---
+    policies = body.get("policies")
+    if not policies or not isinstance(policies, list):
+        return _error("VALIDATION_ERROR", "policies array is required")
 
-    validation_result = body.get("validationResult", "").lower()
-    if validation_result not in VALID_RESULTS:
-        return _error(
-            "VALIDATION_ERROR",
-            f"validationResult must be one of: {', '.join(sorted(VALID_RESULTS))}",
-        )
+    for p in policies:
+        if not p.get("policyNumber"):
+            return _error("VALIDATION_ERROR", "Each policy must have a policyNumber")
+        status = p.get("status", "")
+        if status not in VALID_STATUSES:
+            return _error(
+                "VALIDATION_ERROR",
+                f"policy status must be one of: {', '.join(sorted(VALID_STATUSES))}",
+            )
 
     logger.info(
-        "BD change callback received — transactionId=%s carrierId=%s result=%s",
-        transaction_id, body.get("carrierId"), validation_result,
+        "Servicing agent change callback received — requestId=%s policies=%d",
+        transaction_id, len(policies),
     )
 
-    # --- Map result to DB status and EventBridge verb ---
-    if validation_result == "approved":
+    # --- Determine overall result for DB status and EventBridge verb ---
+    statuses = {p.get("status") for p in policies}
+    if statuses == {"approved"}:
         new_status = "CARRIER_APPROVED"
         verb = "transfer_approved"
-    else:
+    elif "rejected" in statuses:
         new_status = "CARRIER_REJECTED"
         verb = "transfer_rejected"
+    else:
+        new_status = "CARRIER_PENDING_APPOINTMENT"
+        verb = "transfer_pending_appointment"
 
     try:
         update_transact_record(transaction_id, body, new_status)
