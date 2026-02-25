@@ -173,7 +173,7 @@ def _process_change_async(carrier_payload, carrier_info, policy_numbers,
     )
 
     if callback_url:
-        reply_url = f"{callback_url.rstrip('/')}/v0/servicing-agent-changes/reply"
+        reply_url = f"{callback_url.rstrip('/')}/v1/servicing-agent-changes/reply"
         _post_callback(reply_url, response, request_id)
     else:
         logger.info(
