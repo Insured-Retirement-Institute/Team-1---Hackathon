@@ -6,14 +6,17 @@ Integrated with DynamoDB distributor tables.
 
 from flask import request, jsonify, Blueprint
 from datetime import datetime, timezone
+import sys
 import uuid
 import logging
 from dotenv import load_dotenv
 load_dotenv(override=False)
+sys.path.insert(0, "../")
+sys.path.insert(0, "../../")
 from helpers import (create_response,
                      create_error_response,
                      validate_transaction_id)
-from dynamodb_utils import get_item, put_item, update_item, scan_items, Attr
+from lib.utils.dynamodb_utils import get_item, put_item, update_item, scan_items, Attr
 
 BP = Blueprint('broker-dealer', __name__)
 
@@ -293,7 +296,8 @@ def policy_inquiry_callback():
                 400
             )
 
-        logger.info(f"Received policy inquiry response - Transaction ID: {transaction_id}")
+        logger.info(
+            f"Received policy inquiry response - Transaction ID: {transaction_id}")
         logger.info(f"Client: {data.get('client', {}).get('clientName')}")
 
         # Find and update existing transaction
@@ -309,7 +313,8 @@ def policy_inquiry_callback():
             )
             logger.info(f"Updated transaction {transaction_id} to MANIFEST_RECEIVED")
         else:
-            logger.warning(f"Transaction {transaction_id} not found in distributor tables")
+            logger.warning(
+                f"Transaction {transaction_id} not found in distributor tables")
 
         return create_response(
             "RECEIVED",

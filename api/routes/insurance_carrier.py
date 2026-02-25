@@ -5,12 +5,15 @@ Implements the OpenAPI specification for insurance carrier endpoints
 
 from flask import request, jsonify, Blueprint
 from datetime import datetime
+import sys
 import uuid
 import logging
 from helpers import (create_response,
                      create_error_response,
                      validate_transaction_id)
-from dynamodb_utils import get_item, scan_items, Attr
+sys.path.insert(0, "../")
+sys.path.insert(0, "../../")
+from lib.utils.dynamodb_utils import get_item, scan_items, Attr
 
 BP = Blueprint('insurance-carrier', __name__)
 
@@ -278,7 +281,8 @@ def _process_carrier_policy_inquiry(carrier_key: str):
             }
         }
 
-        logger.info(f"[{carrier_name}] Returning {len(policies)} policies for transaction {transaction_id}")
+        logger.info(
+            f"[{carrier_name}] Returning {len(policies)} policies for transaction {transaction_id}")
 
         return create_response(
             "IMMEDIATE",

@@ -1,4 +1,4 @@
-# .\scripts\deploy-lambda.ps1 -FunctionName event-listener
+# .\scripts\deploy-lambda.ps1 -FunctionName api
 
 param(
     [Parameter(Mandatory=$true)]

@@ -6,12 +6,15 @@ Integrated with DynamoDB request-tracking table.
 import os
 from flask import request, jsonify, Blueprint
 from datetime import datetime, timezone
+import sys
 import uuid
 import logging
 from helpers import (create_response,
                      create_error_response,
                      validate_transaction_id)
-from dynamodb_utils import get_item, put_item, update_item, scan_items, query_items, Attr, Key
+sys.path.insert(0, "../")
+sys.path.insert(0, "../../")
+from lib.utils.dynamodb_utils import get_item, put_item, update_item, scan_items, query_items, Attr, Key
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -347,7 +350,8 @@ def dtcc_policy_inquiry():
             }
         }
 
-        logger.info(f"[DTCC/IIEX] Returning {len(policies)} policies for transaction {transaction_id}")
+        logger.info(
+            f"[DTCC/IIEX] Returning {len(policies)} policies for transaction {transaction_id}")
 
         return create_response(
             "IMMEDIATE",
@@ -485,7 +489,8 @@ def policy_inquiry_callback():
         client = data.get('client', {})
         policies = client.get('policies', [])
 
-        logger.info(f"Received policy inquiry response - Transaction ID: {transaction_id}")
+        logger.info(
+            f"Received policy inquiry response - Transaction ID: {transaction_id}")
         logger.info(f"Client: {client.get('clientName')}")
         logger.info(f"Number of policies: {len(policies)}")
 
@@ -520,7 +525,8 @@ def policy_inquiry_callback():
                 initial_status="MANIFEST_RECEIVED",
                 client_name=client.get('clientName'),
                 ssn_last4=client.get('ssnLast4'),
-                policies_affected=[p.get('policyNumber') for p in policies if p.get('policyNumber')],
+                policies_affected=[p.get('policyNumber')
+                                   for p in policies if p.get('policyNumber')],
                 notes="Policy inquiry response received (new record)"
             )
             put_item(REQUEST_TRACKING_TABLE, new_record)
@@ -610,7 +616,8 @@ def bd_change():
                     "carrierId": data.get('carrier-id'),
                 }
             )
-            logger.info(f"Updated tracking record {transaction_id} to CARRIER_VALIDATION_PENDING")
+            logger.info(
+                f"Updated tracking record {transaction_id} to CARRIER_VALIDATION_PENDING")
         else:
             logger.warning(f"Tracking record {transaction_id} not found")
 
