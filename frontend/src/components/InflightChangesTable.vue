@@ -143,7 +143,7 @@ function formatDate(dateString: string): string {
 							{{ change.contractNumber }}
 						</td>
 						<td class="px-6 py-4">
-							<FwbBadge color="green" v-if="change.completionPercentage === 100">Complete</FwbBadge>
+							<FwbBadge type="green" v-if="change.completionPercentage === 100">Complete</FwbBadge>
 							<template v-else>
 								<div class="flex justify-between text-xs">
 									<p>0%</p>
