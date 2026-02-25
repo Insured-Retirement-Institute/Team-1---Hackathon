@@ -43,6 +43,25 @@ export enum ResponseType {
 	Deferred = 'deferred'
 }
 
+export enum ProcessingMode {
+	Immediate = 'immediate',
+	Deferred = 'deferred',
+	Queued = 'queued',
+	Routed = 'routed'
+}
+
+export enum NotificationType {
+	TransferApproved = 'transfer-approved',
+	TransferInitiated = 'transfer-initiated',
+	TransferConfirmed = 'transfer-confirmed',
+	TransferComplete = 'transfer-complete'
+}
+
+export enum RoutingTargetType {
+	Carrier = 'carrier',
+	Clearinghouse = 'clearinghouse'
+}
+
 export enum TransactionStatusValue {
 	ManifestRequested = 'MANIFEST_REQUESTED',
 	ManifestReceived = 'MANIFEST_RECEIVED',
@@ -119,6 +138,10 @@ export interface ClientResponse {
 	policies: DetailedPolicyInfo[]
 }
 
+export function isClientResponse(payload: unknown) : payload is ClientResponse {
+	return (payload as Partial<ClientResponse>)?.policies !== undefined
+}
+
 // Producer validation
 export interface ProducerValidation {
 	agentName: string | null
@@ -190,12 +213,24 @@ export interface CarrierResponse {
 	'additional-data'?: Record<string, unknown>
 }
 
-// Transfer Confirmation
+// Transfer Confirmation (broker sends to clearinghouse)
 export interface TransferConfirmation {
 	'transaction-id': string
 	'delivering-broker-id': string
 	'policy-id': string
 	'confirmation-status': ConfirmationStatus
+	'additional-data'?: Record<string, unknown>
+}
+
+// Transfer Notification (clearinghouse sends to broker)
+export interface TransferNotification {
+	'transaction-id': string
+	'notification-type': NotificationType
+	'policy-id': string
+	'receiving-broker-id'?: string
+	'delivering-broker-id'?: string
+	'carrier-id'?: string
+	'notification-timestamp'?: string
 	'additional-data'?: Record<string, unknown>
 }
 
@@ -219,12 +254,22 @@ export interface TransactionStatus {
 	'additional-data'?: Record<string, unknown>
 }
 
+// Routing information for direct carrier access
+export interface RoutingInformation {
+	targetType: RoutingTargetType
+	targetId: string
+	routedAt?: string
+}
+
 // Standard response
 export interface StandardResponse {
 	code: string
 	message: string
 	transactionId: string
-	payload?: Record<string, unknown> | null
+	payload?: PolicyInquiryResponse | Record<string, unknown> | null
+	processingMode?: ProcessingMode
+	estimatedResponseTime?: string
+	routingInformation?: RoutingInformation
 }
 
 // Error response

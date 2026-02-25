@@ -24,17 +24,20 @@
 .slide-enter-active,
 .slide-leave-active {
 	transition: all 0.3s ease-in-out;
-	transform-origin: top;
 }
 
-.slide-enter-from,
+.slide-enter-from {
+	opacity: 0;
+	transform: translateX(30px);
+}
+
 .slide-leave-to {
 	opacity: 0;
-	transform: scaleY(0) translateY(-10px);
+	transform: translateX(-300px);
 }
 
 .slide-enter-to,
 .slide-leave-from {
 	opacity: 1;
-	transform: scaleY(1) translateY(0);
+	transform: translateX(0);
 }

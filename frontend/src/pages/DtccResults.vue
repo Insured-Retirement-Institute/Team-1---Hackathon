@@ -22,9 +22,12 @@ function getRecordIndex(id: string | number): number {
 
 <template>
 	<div class="w-full">
-		<FwbHeading tag="h1" class="text-center mb-4">DTCC Results</FwbHeading>
-
-		<ContractResultsTable v-if="resolvedRecords.length > 0" :records="resolvedRecords" class="mb-4"/>
+		<ContractResultsTable
+			v-if="resolvedRecords.length > 0"
+			:records="resolvedRecords"
+			:show-actions="false"
+			class="mb-4"
+		/>
 
 		<div class="flex flex-wrap *:p-4">
 			<div

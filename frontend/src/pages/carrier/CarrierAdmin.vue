@@ -55,7 +55,6 @@ onMounted(() => {
     <!-- Header -->
     <div class="mb-6">
       <FwbHeading tag="h1" class="text-center mb-2">Carrier Admin System</FwbHeading>
-      <p class="text-center text-gray-500 text-sm">BD Change Management Portal</p>
     </div>
 
     <!-- Carrier Tabs -->
