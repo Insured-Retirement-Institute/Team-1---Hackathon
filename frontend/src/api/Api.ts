@@ -7,7 +7,9 @@ import type {
 	TransferConfirmation,
 	TransferNotification,
 	TransactionStatus,
-	StandardResponse
+	StandardResponse,
+	PdfExtractionRequest,
+	CarrierLetterRequest
 } from '@/models/ClearinghouseApi'
 import { monotonicFactory } from "ulid";
 
@@ -15,7 +17,6 @@ const ulid = monotonicFactory()
 
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
-	console.log(ulid())
 	const response = await fetch(url, {
 		...options,
 		headers: {
@@ -146,7 +147,23 @@ export const brokerDealerApi = {
 		}),
 
 	queryTransactionStatus: (transactionId: string): Promise<TransactionStatus> =>
-		fetchJson(`${BROKER_DEALER_API}/query-status/${transactionId}`)
+		fetchJson(`${BROKER_DEALER_API}/query-status/${transactionId}`),
+
+	extractPolicyFromPdf: (
+		request: PdfExtractionRequest
+	): Promise<StandardResponse> =>
+		fetchJson(`${BROKER_DEALER_API}/extract-policy-from-pdf`, {
+			method: 'POST',
+			body: JSON.stringify(request)
+		}),
+
+	generateCarrierLetter: (
+		request: CarrierLetterRequest
+	): Promise<StandardResponse> =>
+		fetchJson(`${BROKER_DEALER_API}/generate-carrier-letter`, {
+			method: 'POST',
+			body: JSON.stringify(request)
+		})
 }
 
 // Insurance Carrier API endpoints (for direct carrier queries)

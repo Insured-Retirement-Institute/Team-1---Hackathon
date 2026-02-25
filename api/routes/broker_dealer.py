@@ -5,11 +5,22 @@ Integrated with DynamoDB distributor tables.
 """
 
 from flask import request, jsonify, Blueprint
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 import sys
 import uuid
+import base64
+import json
+import io
+import os
 import logging
+from urllib.request import urlopen, Request as URLRequest
+from urllib.parse import quote
+from urllib.error import HTTPError, URLError
+from botocore.auth import SigV4Auth
+from botocore.awsrequest import AWSRequest
 from dotenv import load_dotenv
+import boto3
+from fpdf import FPDF
 load_dotenv(override=False)
 sys.path.insert(0, "../")
 sys.path.insert(0, "../../")
@@ -19,6 +30,7 @@ from helpers import (create_response,
 from lib.utils.dynamodb_utils import get_item, put_item, update_item, scan_items, Attr
 
 BP = Blueprint('broker-dealer', __name__)
+URL_PREFIX = "/v1/broker-dealer"
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -495,7 +507,673 @@ def transfer_notification():
         )
 
 
-@BP.route('/bd-change-callback', methods=['POST'], strict_slashes=False)
+# ── PDF Policy Statement Extractor ─────────────────────────────────────────────
+# Uses Claude via Bedrock converse() with a native document block.
+# No text-extraction library needed — Claude reads the PDF layout directly.
+
+_PDF_MODEL_ID = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+_PDF_REGION = "us-east-1"
+
+_PDF_SYSTEM_PROMPT = """You are a document data extraction specialist for annuity policy statements.
+
+Your job: read the provided policy statement PDF and extract every relevant field into a
+policyInquiryResponse JSON object. Return ONLY the JSON — no markdown, no code fences,
+no explanation, no prose before or after.
+
+───────────────────────────────────────────────────────────────────────────────
+FIELD EXTRACTION GUIDE
+───────────────────────────────────────────────────────────────────────────────
+
+requestingFirm
+  firmName  → The BROKER-DEALER or financial advisory FIRM that submitted this application
+              (e.g. "Strategic Wealth Advisors", "Premier Financial Services").
+              This is NOT the insurance carrier. Look for labels like "Broker-Dealer",
+              "Selling Firm", "Advisor Firm", "Receiving Firm", "BD Firm", or the
+              firm associated with the servicing agent's employer.
+  firmId    → The BD firm's identifier (DTCC ID, CRD, or internal firm ID shown on the
+              document). null if not present.
+  servicingAgent
+    agentName → Full name of the financial adviser / agent of record / servicing agent
+    npn       → Agent's National Producer Number (NPN). null if not shown.
+
+producerValidation
+  agentName → Same as requestingFirm.servicingAgent.agentName
+  npn       → Same as requestingFirm.servicingAgent.npn
+  errors    → Always []
+
+client
+  clientName  → For INDIVIDUAL accounts: the policy owner's full legal name.
+                For TRUST accounts: the full trust name (e.g. "Foster Family Irrevocable Trust"),
+                NOT the trustee's personal name.
+                For BUSINESS/ENTITY accounts: the entity name.
+  ssnLast4    → Last 4 digits of SSN. For trusts, use the trustee/representative's SSN last 4.
+                For businesses, use the Tax ID last 4. null if not shown at all.
+  policies    → Array — one entry per policy/contract found in the document.
+
+For each policy found:
+  policyNumber      → Contract or policy number exactly as printed
+  carrierName       → Full name of the INSURANCE CARRIER that issued the annuity
+                      (e.g. "Crestview Insurance", "Athene Annuity"). This is NOT the BD firm.
+  accountType       → Map registration type to exactly one of:
+                        individual | joint | trust | custodial | entity
+                      (default "individual" if unclear)
+  planType          → Map tax qualification to exactly one of:
+                        nonQualified | rothIra | traditionalIra | sep | simple
+                      (default "nonQualified" if unclear or not shown)
+  ownership         → "single" | "joint" | "trust" | "other" — null if not shown
+  productName       → Full annuity product name exactly as printed
+  cusip             → 9-character CUSIP identifier. Search the ENTIRE document carefully —
+                      it may appear in a product details section, header, or footer.
+                      Return the value if found; null only if genuinely absent after
+                      thorough review.
+  trailingCommission → false unless the document explicitly states trailing commission applies
+  contractStatus    → Map to exactly one of:
+                        active          — policy is in force / issued / current
+                        pending         — application submitted, not yet issued
+                        surrendered     — contract has been surrendered
+                        death claim pending — death claim in process
+                      Use "pending" if the document shows status "Pending", "Application",
+                      "Not Yet Issued", or similar pre-issuance language.
+  withdrawalStructure
+    systematicInPlace → true only if document explicitly shows a systematic withdrawal
+                        plan is currently active; false otherwise
+  errors            → [] (empty — no validation errors at extraction time)
+
+enums (always include these fixed values):
+  accountType: ["individual", "joint", "trust", "custodial", "entity"]
+  planType:    ["nonQualified", "rothIra", "traditionalIra", "sep", "simple"]
+
+───────────────────────────────────────────────────────────────────────────────
+OUTPUT STRUCTURE — return exactly this shape, nothing else:
+───────────────────────────────────────────────────────────────────────────────
+{
+  "policyInquiryResponse": {
+    "requestingFirm": {
+      "firmName": "...",
+      "firmId": null,
+      "servicingAgent": { "agentName": "...", "npn": "..." }
+    },
+    "producerValidation": {
+      "agentName": "...",
+      "npn": "...",
+      "errors": []
+    },
+    "client": {
+      "clientName": "...",
+      "ssnLast4": "...",
+      "policies": [
+        {
+          "policyNumber": "...",
+          "carrierName": "...",
+          "accountType": "individual",
+          "planType": "nonQualified",
+          "ownership": "single",
+          "productName": "...",
+          "cusip": null,
+          "trailingCommission": false,
+          "contractStatus": "active",
+          "withdrawalStructure": { "systematicInPlace": false },
+          "errors": []
+        }
+      ]
+    },
+    "enums": {
+      "accountType": ["individual", "joint", "trust", "custodial", "entity"],
+      "planType": ["nonQualified", "rothIra", "traditionalIra", "sep", "simple"]
+    }
+  }
+}
+"""
+
+
+def _strip_pdf_fences(text: str) -> str:
+    """Strip markdown code fences the model occasionally wraps around JSON."""
+    text = text.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    return text
+
+
+def _extract_from_pdf(pdf_base64: str, request_id: str) -> dict:
+    """
+    Decode a Base64-encoded policy statement PDF and extract structured data via Bedrock.
+
+    Passes the PDF as a native document block to Claude — no text extraction library needed.
+    Returns the parsed policyInquiryResponse dict.
+    Raises ValueError on bad base64, json.JSONDecodeError on non-JSON model output.
+    """
+    try:
+        pdf_bytes = base64.b64decode(pdf_base64, validate=False)
+    except Exception as e:
+        raise ValueError(f"Invalid base64 encoding: {e}") from e
+
+    logger.info("Sending PDF to Bedrock — request_id=%s size=%d bytes",
+                request_id, len(pdf_bytes))
+
+    client = boto3.client("bedrock-runtime", region_name=_PDF_REGION)
+    response = client.converse(
+        modelId=_PDF_MODEL_ID,
+        system=[{"text": _PDF_SYSTEM_PROMPT}],
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "document": {
+                        "format": "pdf",
+                        "name": "policy_statement",
+                        "source": {"bytes": pdf_bytes},
+                    }
+                },
+                {
+                    "text": (
+                        f"Extract all policy information from this statement. "
+                        f"Request ID: {request_id}. "
+                        "Return ONLY the JSON object — no other text."
+                    )
+                },
+            ],
+        }],
+    )
+
+    raw = response["output"]["message"]["content"][0]["text"]
+    logger.info("Bedrock extraction complete — request_id=%s", request_id)
+    return json.loads(_strip_pdf_fences(raw))
+
+
+@BP.route('/extract-policy-from-pdf', methods=['POST'])
+def extract_policy_from_pdf():
+    """
+    Extract structured policy data from a Base64-encoded carrier policy statement PDF.
+
+    Passes the PDF natively to Claude via Bedrock converse() and returns a
+    policyInquiryResponse matching the Step 2 BD Change process format.
+    Each form may vary in the data it provides — all present fields are extracted,
+    absent fields are returned as null.
+
+    Required header:
+      transactionId: <UUID>
+
+    Required body fields:
+      requestId   string   Caller-supplied request identifier
+      pdfBase64   string   Base64-encoded bytes of the policy statement PDF
+
+    Response codes:
+      EXTRACTED        — extraction succeeded; policyInquiryResponse in payload
+      INVALID_PDF      — base64 could not be decoded
+      EXTRACTION_ERROR — Bedrock call or JSON parse failure
+    """
+    transaction_id, error = validate_transaction_id(request.headers)
+    if error:
+        return error
+
+    data = request.get_json(silent=True)
+    if not data:
+        return create_error_response("INVALID_PAYLOAD", "JSON request body is required", 400)
+
+    missing = [f for f in ("requestId", "pdfBase64") if not data.get(f)]
+    if missing:
+        return create_error_response(
+            "VALIDATION_ERROR",
+            f"Missing required fields: {', '.join(missing)}",
+            400,
+        )
+
+    request_id = data["requestId"]
+    logger.info("PDF extraction — transactionId=%s requestId=%s",
+                transaction_id, request_id)
+
+    try:
+        result = _extract_from_pdf(data["pdfBase64"], request_id)
+    except ValueError as e:
+        logger.error("PDF decode error — requestId=%s: %s", request_id, e)
+        return create_error_response("INVALID_PDF", str(e), 400)
+    except json.JSONDecodeError as e:
+        logger.error("Non-JSON model response — requestId=%s: %s", request_id, e)
+        return create_error_response(
+            "EXTRACTION_ERROR",
+            "Model returned non-JSON output. Verify the PDF is a readable policy statement.",
+            500,
+        )
+    except Exception as e:
+        logger.error("Extraction failed — requestId=%s: %s", request_id, e, exc_info=True)
+        return create_error_response("EXTRACTION_ERROR", str(e), 500)
+
+    policies = (
+        (result.get("policyInquiryResponse") or {})
+        .get("client", {})
+        .get("policies", [])
+    )
+    logger.info("Extraction successful — requestId=%s policies=%d",
+                request_id, len(policies))
+
+    return create_response(
+        "EXTRACTED",
+        "Policy data extracted from document",
+        transaction_id,
+        result,
+        200,
+        processing_mode="immediate",
+    )
+
+
+# ── Carrier Letter Agent ────────────────────────────────────────────────────────
+# Off-DTCC scenario: DTCC returned "no contracts found" — BD must send a formal
+# servicing-agent change letter directly to the carrier.
+#
+# Letter generation is delegated to the AgentCore carrier letter runtime
+# (iri_carrier_letter_agent). That runtime runs a Strands Agent which does carrier
+# lookup and letter composition. The letter text is returned here, where we render
+# the PDF in-memory via fpdf2 and run a QC pass via Bedrock converse() before
+# returning the completed letter to the caller.
+
+_CARRIER_DIR_PATH = os.path.join(os.path.dirname(
+    __file__), "..", "data", "carrier_directory.json")
+_LETTER_MODEL_ID = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+_LETTER_REGION = "us-east-1"
+
+# AgentCore carrier letter runtime
+_LETTER_AGENT_ARN = "arn:aws:bedrock-agentcore:us-east-1:762233730742:runtime/iri_carrier_letter_agent-6N5TdgCRbG"
+_LETTER_AGENT_REGION = "us-east-1"
+_LETTER_AGENT_HOST = f"bedrock-agentcore.{_LETTER_AGENT_REGION}.amazonaws.com"
+
+
+def _load_carrier_directory() -> list[dict]:
+    """Load and return the list of carriers from the bundled directory JSON."""
+    try:
+        with open(_CARRIER_DIR_PATH) as f:
+            return json.load(f)["carriers"]
+    except Exception:
+        return []
+
+
+def _strip_fences(text: str) -> str:
+    """Strip markdown code fences the LLM sometimes wraps around JSON output."""
+    text = text.strip()
+    if text.startswith("```"):
+        lines = text.split("\n")
+        lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    return text
+
+
+def _call_letter_agent(payload: dict) -> dict:
+    """
+    Invoke the AgentCore carrier letter agent via SigV4-signed HTTP POST.
+
+    The runtime runs a Strands agent that calls lookup_carrier and
+    generate_change_letter, then returns {"letterText": "...", ...}.
+
+    Args:
+        payload: Dict matching the carrier_letter_request schema.
+
+    Returns:
+        Response dict with "letterText" key, or {"error": "..."} on failure.
+    """
+    session = boto3.Session()
+    creds = session.get_credentials().get_frozen_credentials()
+
+    session_id = str(uuid.uuid4())
+    encoded_arn = quote(_LETTER_AGENT_ARN, safe="")
+    url = f"https://{_LETTER_AGENT_HOST}/runtimes/{encoded_arn}/invocations?qualifier=DEFAULT"
+    body_bytes = json.dumps(payload).encode("utf-8")
+
+    aws_request = AWSRequest(
+        method="POST",
+        url=url,
+        data=body_bytes,
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id": session_id,
+        },
+    )
+    SigV4Auth(creds, "bedrock-agentcore", _LETTER_AGENT_REGION).add_auth(aws_request)
+
+    req = URLRequest(url, data=body_bytes, headers=dict(
+        aws_request.headers), method="POST")
+
+    try:
+        with urlopen(req, timeout=300) as resp:
+            raw = resp.read().decode("utf-8")
+    except HTTPError as e:
+        error_body = e.read().decode("utf-8", errors="replace")
+        logger.error("Letter AgentCore HTTP %s: %s", e.code, error_body)
+        return {"error": f"AgentCore HTTP {e.code}", "message": error_body}
+    except URLError as e:
+        logger.error("Letter AgentCore connection error: %s", e)
+        return {"error": "AgentCore connection error", "message": str(e)}
+    except Exception as e:
+        logger.error("Unexpected error calling letter AgentCore: %s", e, exc_info=True)
+        return {"error": "AgentCore invocation failed", "message": str(e)}
+
+    # Handle SSE or plain JSON response
+    lines = raw.splitlines()
+    data_lines = [ln[6:] for ln in lines if ln.startswith("data: ")]
+    raw = "".join(data_lines).strip() if data_lines else raw.strip()
+    raw = _strip_fences(raw)
+
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        logger.error("Letter agent non-JSON response (first 500): %s", raw[:500])
+        return {"error": "Agent returned non-JSON response", "raw": raw[:500]}
+
+
+def _letter_to_pdf_base64(letter_text: str) -> str:
+    """Render letter_text to a PDF and return it as a Base64 string."""
+
+    def _is_separator(s: str) -> bool:
+        return len(s) >= 8 and len(set(s)) == 1 and s[0] in "-=_*"
+
+    def _ascii_safe(s: str) -> str:
+        return (
+            s.replace("\u2500", "-").replace("\u2502", "|")
+             .replace("\u2014", "--").replace("\u2013", "-")
+             .replace("\u2022", "*").replace("\u2019", "'")
+             .replace("\u2018", "'").replace("\u201c", '"')
+             .replace("\u201d", '"').replace("\u2026", "...")
+        )
+
+    class LetterPDF(FPDF):
+        def header(self):
+            self.set_fill_color(30, 60, 114)
+            self.rect(0, 0, 210, 12, "F")
+            self.set_font("Helvetica", "B", size=9)
+            self.set_text_color(255, 255, 255)
+            self.set_xy(25, 3)
+            self.cell(0, 6, "SERVICING AGENT CHANGE REQUEST  |  CONFIDENTIAL")
+            self.set_text_color(0, 0, 0)
+            # fpdf2 does not reset the cursor after header() — do it explicitly
+            self.set_y(self.t_margin)
+
+        def footer(self):
+            self.set_y(-15)
+            self.set_draw_color(30, 60, 114)
+            self.set_line_width(0.3)
+            self.line(25, self.get_y(), 185, self.get_y())
+            self.ln(2)
+            self.set_font("Helvetica", "I", size=7)
+            self.set_text_color(120, 120, 120)
+            self.cell(
+                0, 4, "Generated by BD Change Process Agent  |  For authorized use only", align="C")
+
+    pdf = LetterPDF()
+    pdf.set_margins(left=25, top=20, right=25)
+    pdf.set_auto_page_break(auto=True, margin=20)
+    pdf.add_page()
+
+    for line in letter_text.split("\n"):
+        stripped = _ascii_safe(line.rstrip())
+        if stripped == "":
+            pdf.ln(4)
+        elif _is_separator(stripped):
+            if stripped[0] == "=":
+                pdf.set_draw_color(30, 60, 114)
+                pdf.set_line_width(0.5)
+            else:
+                pdf.set_draw_color(180, 180, 180)
+                pdf.set_line_width(0.3)
+            y = pdf.get_y()
+            pdf.line(25, y, 185, y)
+            pdf.ln(2)
+        else:
+            pdf.set_x(pdf.l_margin)
+            if stripped.startswith(("Re:", "Dear")):
+                pdf.set_font("Helvetica", "B", size=10)
+            elif stripped.isupper() and len(stripped) > 8:
+                pdf.set_font("Helvetica", "B", size=9)
+                pdf.set_text_color(30, 60, 114)
+            elif stripped.startswith("_____"):
+                pdf.set_font("Helvetica", size=10)
+                pdf.set_text_color(0, 0, 0)
+            else:
+                pdf.set_font("Helvetica", size=9)
+                pdf.set_text_color(0, 0, 0)
+            pdf.multi_cell(0, 5, stripped)
+            pdf.set_text_color(0, 0, 0)
+
+    pdf_bytes = pdf.output()
+    return base64.b64encode(pdf_bytes).decode("utf-8")
+
+
+def _qc_letter_pdf(pdf_base64: str) -> dict:
+    """
+    Pass the rendered PDF back to Claude as a native document block for quality
+    control. Checks that all required sections are present and well-formed.
+    Returns {"passed": bool, "notes": str}.
+    """
+    try:
+        pdf_bytes = base64.b64decode(pdf_base64)
+        client = boto3.client("bedrock-runtime", region_name=_LETTER_REGION)
+        response = client.converse(
+            modelId=_LETTER_MODEL_ID,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "document": {
+                            "format": "pdf",
+                            "name": "carrier_letter",
+                            "source": {"bytes": pdf_bytes},
+                        }
+                    },
+                    {
+                        "text": (
+                            "Review this servicing agent change letter for completeness and quality. "
+                            "Verify all required sections are present: carrier name and mailing address, "
+                            "client name and SSN last 4, policy number(s), current servicing agent name "
+                            "and NPN, new servicing agent name and NPN, broker-dealer name and DTCC ID, "
+                            "trailing commission statement, reason for change, and requesting firm "
+                            "signature block with contact information. "
+                            "Reply with exactly 'QC_PASS' if the letter is complete and well-formed, "
+                            "or 'QC_ISSUES: <brief list of problems>' if anything is missing or incorrect."
+                        )
+                    },
+                ],
+            }],
+        )
+        qc_text = response["output"]["message"]["content"][0]["text"].strip()
+        return {"passed": qc_text.startswith("QC_PASS"), "notes": qc_text}
+    except Exception as exc:
+        logger.warning("PDF QC step failed (non-fatal): %s", exc)
+        return {"passed": True, "notes": "QC step skipped due to internal error"}
+
+
+@BP.route('/generate-carrier-letter', methods=['POST'])
+def generate_carrier_letter():
+    """
+    Generate a formal off-DTCC servicing agent change letter addressed to the carrier.
+
+    Used when a DTCC Policy Inquiry returned 'no contracts found' and the broker-dealer
+    must contact the carrier directly. Generates both the letter text and a PDF.
+
+    The carrier directory is consulted to fill in the mailing address and surface any
+    carrier-specific requirements (proprietary form required, notarization, etc.).
+
+    Required header:
+      transactionId: <UUID>
+
+    Required body fields (see schemas/carrier_letter_request.schema.json):
+      requestId           string   Caller-supplied identifier
+      carrierName         string   Carrier name or alias (directory lookup performed)
+      client.name         string   Full name of the policy owner
+      client.ssnLast4     string   Last 4 digits of SSN
+      policyNumbers       array    List of policy/contract numbers
+      currentAgent        object   name + npn of agent being replaced
+      newAgent            object   name, npn, bdName, bdDtccId of incoming agent
+      reasonForChange     string   Plain-language reason
+      trailingCommission  string   "yes" | "no" | "unknown"
+      requestingFirm      object   name, contact, phone of the submitting BD
+
+    Optional:
+      carrierDepartment          string   Overrides directory default
+      carrierAddress             object   Full address — required if carrier not in directory
+      effectiveDateRequested     string   YYYY-MM-DD; omit for 'as soon as possible'
+
+    Response codes:
+      GENERATED           — letter and PDF produced successfully
+      CARRIER_OWN_FORM    — carrier requires its own proprietary form; letter not generated
+      VALIDATION_ERROR    — missing required fields or carrier address unresolvable
+    """
+    transaction_id, error = validate_transaction_id(request.headers)
+    if error:
+        return error
+
+    data = request.get_json(silent=True)
+    if not data:
+        return create_error_response("INVALID_PAYLOAD", "JSON request body is required", 400)
+
+    required = ["requestId", "carrierName", "client", "policyNumbers",
+                "currentAgent", "newAgent", "reasonForChange",
+                "trailingCommission", "requestingFirm"]
+    missing = [f for f in required if not data.get(f)]
+    if missing:
+        return create_error_response(
+            "VALIDATION_ERROR", f"Missing required fields: {', '.join(missing)}", 400
+        )
+
+    request_id = data["requestId"]
+    carrier_name_req = data["carrierName"]
+    logger.info("Carrier letter generation — transactionId=%s requestId=%s carrier=%s",
+                transaction_id, request_id, carrier_name_req)
+
+    # Pre-flight: check if carrier requires a proprietary form (fast directory lookup, no AI).
+    # This avoids burning an LLM call for carriers like Nationwide that can never use a generic letter.
+    carriers = _load_carrier_directory()
+    carrier_record = next(
+        (c for c in carriers
+         if carrier_name_req.lower() in
+         [c["carrier_name"].lower()] + [a.lower() for a in c.get("aliases", [])]),
+        None,
+    )
+    requirements = carrier_record.get("requirements", {}) if carrier_record else {}
+    if requirements.get("use_own_form"):
+        form_name = requirements.get("own_form_name", "the carrier's proprietary form")
+        logger.info("Carrier requires own form — requestId=%s carrier=%s",
+                    request_id, carrier_name_req)
+        return create_response(
+            "CARRIER_OWN_FORM",
+            f"{carrier_name_req} requires the use of {form_name}. "
+            "A generic letter cannot be generated for this carrier. "
+            "Please obtain the carrier's proprietary form.",
+            transaction_id,
+            {
+                "carrierName": carrier_record["carrier_name"],
+                "ownFormName": form_name,
+                "notes": requirements.get("notes", ""),
+                "portalUrl": carrier_record.get("correspondence", {}).get("portal_url"),
+            },
+            200,
+        )
+
+    # If carrier is not in directory and no address override was supplied, fail fast.
+    if not carrier_record and not data.get("carrierAddress"):
+        return create_error_response(
+            "VALIDATION_ERROR",
+            f"Carrier '{carrier_name_req}' not found in directory and no carrierAddress provided.",
+            400,
+        )
+
+    new_agent = data["newAgent"]
+    current_agent = data["currentAgent"]
+    client = data["client"]
+    firm = data["requestingFirm"]
+
+    # Build the structured payload for the AgentCore carrier letter runtime.
+    agent_payload = {
+        "carrierName": carrier_name_req,
+        "carrierDepartment": data.get("carrierDepartment", ""),
+        "carrierAddress": data.get("carrierAddress"),
+        "client": {"name": client["name"], "ssnLast4": client["ssnLast4"]},
+        "policyNumbers": data["policyNumbers"],
+        "currentAgent": {"name": current_agent["name"], "npn": current_agent["npn"]},
+        "newAgent": {
+            "name": new_agent["name"],
+            "npn": new_agent["npn"],
+            "bdName": new_agent["bdName"],
+            "bdDtccId": new_agent["bdDtccId"],
+        },
+        "reasonForChange": data["reasonForChange"],
+        "trailingCommission": data["trailingCommission"],
+        "effectiveDateRequested": data.get("effectiveDateRequested", ""),
+        "requestingFirm": {"name": firm["name"], "contact": firm["contact"], "phone": firm["phone"]},
+    }
+
+    # Dispatch to AgentCore carrier letter runtime.
+    logger.info("Dispatching to AgentCore letter agent — requestId=%s carrier=%s",
+                request_id, carrier_name_req)
+    try:
+        agent_response = _call_letter_agent(agent_payload)
+    except Exception as e:
+        logger.error("Letter agent dispatch failed — requestId=%s: %s",
+                     request_id, e, exc_info=True)
+        return create_error_response("GENERATION_ERROR", f"AgentCore error: {e}", 500)
+
+    if "error" in agent_response:
+        logger.error("Letter agent returned error — requestId=%s: %s",
+                     request_id, agent_response)
+        return create_error_response("GENERATION_ERROR",
+                                     agent_response.get("error", "Agent error"), 500)
+
+    letter_text = agent_response.get("letterText")
+    if not letter_text:
+        logger.error("Letter agent returned no letterText — requestId=%s response=%s",
+                     request_id, str(agent_response)[:200])
+        return create_error_response("GENERATION_ERROR", "Agent did not produce letter text.", 500)
+
+    # Render PDF in-memory.
+    try:
+        pdf_base64 = _letter_to_pdf_base64(letter_text)
+    except Exception as e:
+        logger.error("PDF rendering failed — requestId=%s: %s",
+                     request_id, e, exc_info=True)
+        return create_error_response("GENERATION_ERROR", f"PDF rendering failed: {e}", 500)
+
+    # QC pass — Claude reviews the rendered PDF as a native document block.
+    qc = _qc_letter_pdf(pdf_base64)
+    logger.info("Letter QC — requestId=%s passed=%s notes=%s",
+                request_id, qc["passed"], qc["notes"][:80])
+
+    logger.info("Carrier letter generated — requestId=%s carrier=%s policies=%d qc_passed=%s",
+                request_id, carrier_name_req, len(data["policyNumbers"]), qc["passed"])
+
+    payload = {
+        "letterText": letter_text,
+        "pdfBase64": pdf_base64,
+        "qcReview": qc,
+        "metadata": {
+            "carrier": carrier_record["carrier_name"] if carrier_record else carrier_name_req,
+            "client": client["name"],
+            "policyNumbers": data["policyNumbers"],
+            "newAgent": new_agent["name"],
+            "generatedDate": date.today().isoformat(),
+            "carrierRequirements": {
+                "wetSignatureRequired": requirements.get("wet_signature_required", True),
+                "notarizationRequired": requirements.get("notarization_required", False),
+                "medallionRequired": requirements.get("medallion_required", False),
+                "notes": requirements.get("notes", ""),
+                "processingTimeDays": carrier_record.get("processing_time_days") if carrier_record else None,
+            } if requirements else {},
+        },
+    }
+
+    return create_response(
+        "GENERATED",
+        f"Carrier letter generated for {carrier_name_req}",
+        transaction_id,
+        payload,
+        200,
+        processing_mode="immediate",
+    )
+
+
+@BP.route('/bd-change-callback', methods=['POST'])
 def bd_change_callback():
     """
     BD change callback - receive carrier validation response.
