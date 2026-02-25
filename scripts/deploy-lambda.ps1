@@ -50,6 +50,13 @@ try {
     # Step 1: Package the Lambda function
     Write-Status "Packaging Lambda function..." "Info"
 
+    # Copy lib folder if it exists
+    $libSource = Join-Path $FunctionName "lib"
+    if (Test-Path $libSource) {
+        Write-Status "Copying lib folder..." "Info"
+        Copy-Item -Path $libSource -Destination $tempDir -Recurse -Force
+    }
+
     # Copy source files to temp directory
     Copy-Item -Path (Join-Path $FunctionName "*") -Destination $tempDir -Recurse -Force
 
