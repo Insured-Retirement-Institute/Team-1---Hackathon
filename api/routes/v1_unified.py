@@ -1,13 +1,13 @@
 """
-v0 Unified Brokerage Transfer API — Agentic endpoints.
+v1 Unified Brokerage Transfer API — Agentic endpoints.
 
 Implements the async 202 + callback pattern for AI-powered endpoints.
 Policy inquiry is owned by Sasha — not implemented here.
 
 Blueprints:
-  servicing_agent_changes_bp → /v0/servicing-agent-changes/
-  transfer_notifications_bp  → /v0/transfer-notifications/
-  status_bp                  → /v0/status/
+  servicing_agent_changes_bp → /v1/servicing-agent-changes/
+  transfer_notifications_bp  → /v1/transfer-notifications/
+  status_bp                  → /v1/status/
 """
 
 from flask import request, Blueprint
@@ -47,14 +47,14 @@ REPLY_PK_PREFIX = "CHANGE_REPLY#"
 
 # ── Blueprints ──────────────────────────────────────────────────────────────
 
-servicing_agent_changes_bp = Blueprint("v0-servicing-agent-changes", __name__)
-transfer_notifications_bp = Blueprint("v0-transfer-notifications", __name__)
-status_bp = Blueprint("v0-status", __name__)
+servicing_agent_changes_bp = Blueprint("v1-servicing-agent-changes", __name__)
+transfer_notifications_bp = Blueprint("v1-transfer-notifications", __name__)
+status_bp = Blueprint("v1-status", __name__)
 
 
 # ── Shared helpers ──────────────────────────────────────────────────────────
 
-# Map AgentCore NIGO deficiency codes → v0 spec ServicingAgentChangeError codes
+# Map AgentCore NIGO deficiency codes → v1 spec ServicingAgentChangeError codes
 _NIGO_CODE_MAP = {
     "SIGNATURE-MISSING": "carrierSpecific",
     "SIGNATURE-STALE": "carrierSpecific",
@@ -78,7 +78,7 @@ ALL_US_STATES = [
 
 def _build_change_response(determination, carrier_info, policy_numbers, request_id):
     """
-    Map an AgentCore IGO/NIGO determination to a v0 ServicingAgentChangeResponse.
+    Map an AgentCore IGO/NIGO determination to a v1 ServicingAgentChangeResponse.
     """
     det_value = determination.get("determination", "")
     today = date.today().isoformat()
@@ -185,7 +185,7 @@ def _process_change_async(carrier_payload, carrier_info, policy_numbers,
 @servicing_agent_changes_bp.route("/create", methods=["POST"])
 def create_servicing_agent_change():
     """
-    POST /v0/servicing-agent-changes/create
+    POST /v1/servicing-agent-changes/create
 
     Accept a servicing agent change request, return 202 immediately,
     and process via AgentCore in a background thread. When the agent
@@ -216,7 +216,7 @@ def create_servicing_agent_change():
     inbound_context = data.get("context", "")
 
     logger.info(
-        "v0 servicing agent change — requestId=%s, carrier=%s, policies=%s, agent=%s",
+        "v1 servicing agent change — requestId=%s, carrier=%s, policies=%s, agent=%s",
         body_request_id,
         carrier.get("carrierName"),
         policy_numbers,
@@ -293,7 +293,7 @@ def create_servicing_agent_change():
 @servicing_agent_changes_bp.route("/reply", methods=["POST"])
 def reply_servicing_agent_change():
     """
-    POST /v0/servicing-agent-changes/reply
+    POST /v1/servicing-agent-changes/reply
 
     Receive a servicing agent change response (from carrier async processing
     or forwarded by clearinghouse). Stores the response and returns
@@ -323,7 +323,7 @@ def reply_servicing_agent_change():
     }
     put_item(REPLY_TABLE, item)
 
-    logger.info("v0 servicing agent change reply stored in DynamoDB — requestId=%s", resp_request_id)
+    logger.info("v1 servicing agent change reply stored in DynamoDB — requestId=%s", resp_request_id)
     return acknowledgment_response(
         request_id,
         "Servicing agent change response received successfully",
@@ -334,7 +334,7 @@ def reply_servicing_agent_change():
 @servicing_agent_changes_bp.route("/reply", methods=["GET"])
 def list_change_responses():
     """
-    GET /v0/servicing-agent-changes/reply
+    GET /v1/servicing-agent-changes/reply
 
     List all received servicing agent change responses from DynamoDB.
     """
@@ -363,7 +363,7 @@ def list_change_responses():
 @servicing_agent_changes_bp.route("/reply/<request_id>", methods=["GET"])
 def get_change_response(request_id):
     """
-    GET /v0/servicing-agent-changes/reply/<requestId>
+    GET /v1/servicing-agent-changes/reply/<requestId>
 
     Retrieve a specific servicing agent change response by requestId.
     """
@@ -397,7 +397,7 @@ def get_change_response(request_id):
 @transfer_notifications_bp.route("/create", methods=["POST"])
 def create_transfer_notification():
     """
-    POST /v0/transfer-notifications/create
+    POST /v1/transfer-notifications/create
 
     Receive a transfer notification. Returns AcknowledgmentResponse.
     """
@@ -418,7 +418,7 @@ def create_transfer_notification():
         )
 
     logger.info(
-        "v0 transfer notification — requestId=%s, type=%s, policy=%s",
+        "v1 transfer notification — requestId=%s, type=%s, policy=%s",
         request_id,
         data.get("notificationType"),
         data.get("policyNumber"),
@@ -432,7 +432,7 @@ def create_transfer_notification():
 @transfer_notifications_bp.route("/reply", methods=["POST"])
 def reply_transfer_notification():
     """
-    POST /v0/transfer-notifications/reply
+    POST /v1/transfer-notifications/reply
 
     Receive a transfer confirmation. Returns AcknowledgmentResponse.
     """
@@ -453,7 +453,7 @@ def reply_transfer_notification():
         )
 
     logger.info(
-        "v0 transfer confirmation — requestId=%s, policy=%s, status=%s",
+        "v1 transfer confirmation — requestId=%s, policy=%s, status=%s",
         request_id,
         data.get("policyNumber"),
         data.get("confirmationStatus"),
@@ -471,7 +471,7 @@ def reply_transfer_notification():
 @status_bp.route("/<request_id>", methods=["GET"])
 def query_request_status(request_id):
     """
-    GET /v0/status/<requestId>
+    GET /v1/status/<requestId>
 
     Query current status for a request. Returns RequestStatus.
     """
