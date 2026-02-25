@@ -10,7 +10,8 @@ import os
 import sys
 import logging
 import importlib
-import serverless_wsgi
+import awsgi
+# import serverless_wsgi
 from dotenv import load_dotenv
 
 # Add lib/utils to path for dynamodb_utils imports
@@ -85,10 +86,7 @@ def internal_error(e):
 
 def handler(event, context):
     event = normalize_lambda_event(event)
-    import awsgi
     return awsgi.response(app, event, context)
-
-    # return serverless_wsgi.handle_request(app, event, context)
 
 
 if __name__ == '__main__':
