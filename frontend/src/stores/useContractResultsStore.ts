@@ -248,8 +248,6 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 		await new Promise(resolve => setTimeout(resolve, 2000))
 
 		try {
-			// Try API call
-			const transactionId = crypto.randomUUID()
 			const request: PolicyInquiryRequest = {
 				requestingFirm: {
 					firmName: 'Demo Firm',
@@ -266,7 +264,7 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 				}
 			}
 
-			const response = await brokerDealerApi.submitPolicyInquiryRequest(transactionId, request)
+			const response = await brokerDealerApi.submitPolicyInquiryRequest(request)
 
 
 			if (isClientResponse(response.payload?.client) && response.payload?.client.policies && response.payload.client.policies.length > 0) {

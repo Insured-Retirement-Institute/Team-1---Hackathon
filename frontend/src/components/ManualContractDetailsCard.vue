@@ -33,19 +33,15 @@ const ownershipOptions = [
 
 <template>
 	<div
-		class="bg-[#f8f8f8] rounded-xl p-6 mb-4"
+		class="bg-white rounded-xl p-6 mb-4"
 		:class="{ 'outline-blue-600 outline-2': record.selected }"
 	>
 		<div class="flex items-center justify-between mb-4">
 			<div class="flex items-center gap-2">
 				<FwbCheckbox v-model="record.selected" />
 
-				<div>
-					<p class="text-lg font-bold">No electronic record found</p>
-					<p>Enter the following details to proceed</p>
-				</div>
+				<p class="text-gray-900 text-lg font-bold">Contract {{ record.contractNumber }}</p>
 			</div>
-			<p class="text-gray-900 text-sm font-bold">Contract #{{ record.contractNumber }}</p>
 		</div>
 
 		<div class="grid grid-cols-3 gap-4">

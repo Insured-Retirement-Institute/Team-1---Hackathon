@@ -31,7 +31,7 @@ const router = createRouter({
 			path: '/dtcc-results',
 			component: () => import('@/pages/DtccResults.vue'),
 			meta: {
-				title: 'DTCC Results',
+				title: 'Contract Results from DTCC',
 				next: {
 					route: '/carrier-results',
 					handler: async () => {
