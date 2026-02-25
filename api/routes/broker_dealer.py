@@ -13,11 +13,14 @@ import json
 import io
 import os
 import logging
+from urllib.request import urlopen, Request as URLRequest
+from urllib.parse import quote
+from urllib.error import HTTPError, URLError
+from botocore.auth import SigV4Auth
+from botocore.awsrequest import AWSRequest
 from dotenv import load_dotenv
 import boto3
 from fpdf import FPDF
-from strands import Agent, tool
-from strands.models import BedrockModel
 load_dotenv(override=False)
 sys.path.insert(0, "../")
 sys.path.insert(0, "../../")
@@ -758,13 +761,20 @@ def extract_policy_from_pdf():
 # Off-DTCC scenario: DTCC returned "no contracts found" — BD must send a formal
 # servicing-agent change letter directly to the carrier.
 #
-# Uses a Strands Agent (Claude via Bedrock) for carrier lookup, template selection,
-# and letter composition. PDF is rendered in-memory via fpdf2 and then passed back
-# to Claude as a native document block for quality control before returning.
+# Letter generation is delegated to the AgentCore carrier letter runtime
+# (iri_carrier_letter_agent). That runtime runs a Strands Agent which does carrier
+# lookup and letter composition. The letter text is returned here, where we render
+# the PDF in-memory via fpdf2 and run a QC pass via Bedrock converse() before
+# returning the completed letter to the caller.
 
 _CARRIER_DIR_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "carrier_directory.json")
 _LETTER_MODEL_ID  = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 _LETTER_REGION    = "us-east-1"
+
+# AgentCore carrier letter runtime
+_LETTER_AGENT_ARN    = "arn:aws:bedrock-agentcore:us-east-1:762233730742:runtime/iri_carrier_letter_agent-6N5TdgCRbG"
+_LETTER_AGENT_REGION = "us-east-1"
+_LETTER_AGENT_HOST   = f"bedrock-agentcore.{_LETTER_AGENT_REGION}.amazonaws.com"
 
 
 def _load_carrier_directory() -> list[dict]:
@@ -774,6 +784,80 @@ def _load_carrier_directory() -> list[dict]:
             return json.load(f)["carriers"]
     except Exception:
         return []
+
+
+def _strip_fences(text: str) -> str:
+    """Strip markdown code fences the LLM sometimes wraps around JSON output."""
+    text = text.strip()
+    if text.startswith("```"):
+        lines = text.split("\n")
+        lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    return text
+
+
+def _call_letter_agent(payload: dict) -> dict:
+    """
+    Invoke the AgentCore carrier letter agent via SigV4-signed HTTP POST.
+
+    The runtime runs a Strands agent that calls lookup_carrier and
+    generate_change_letter, then returns {"letterText": "...", ...}.
+
+    Args:
+        payload: Dict matching the carrier_letter_request schema.
+
+    Returns:
+        Response dict with "letterText" key, or {"error": "..."} on failure.
+    """
+    session = boto3.Session()
+    creds = session.get_credentials().get_frozen_credentials()
+
+    session_id = str(uuid.uuid4())
+    encoded_arn = quote(_LETTER_AGENT_ARN, safe="")
+    url = f"https://{_LETTER_AGENT_HOST}/runtimes/{encoded_arn}/invocations?qualifier=DEFAULT"
+    body_bytes = json.dumps(payload).encode("utf-8")
+
+    aws_request = AWSRequest(
+        method="POST",
+        url=url,
+        data=body_bytes,
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id": session_id,
+        },
+    )
+    SigV4Auth(creds, "bedrock-agentcore", _LETTER_AGENT_REGION).add_auth(aws_request)
+
+    req = URLRequest(url, data=body_bytes, headers=dict(aws_request.headers), method="POST")
+
+    try:
+        with urlopen(req, timeout=300) as resp:
+            raw = resp.read().decode("utf-8")
+    except HTTPError as e:
+        error_body = e.read().decode("utf-8", errors="replace")
+        logger.error("Letter AgentCore HTTP %s: %s", e.code, error_body)
+        return {"error": f"AgentCore HTTP {e.code}", "message": error_body}
+    except URLError as e:
+        logger.error("Letter AgentCore connection error: %s", e)
+        return {"error": "AgentCore connection error", "message": str(e)}
+    except Exception as e:
+        logger.error("Unexpected error calling letter AgentCore: %s", e, exc_info=True)
+        return {"error": "AgentCore invocation failed", "message": str(e)}
+
+    # Handle SSE or plain JSON response
+    lines = raw.splitlines()
+    data_lines = [ln[6:] for ln in lines if ln.startswith("data: ")]
+    raw = "".join(data_lines).strip() if data_lines else raw.strip()
+    raw = _strip_fences(raw)
+
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        logger.error("Letter agent non-JSON response (first 500): %s", raw[:500])
+        return {"error": "Agent returned non-JSON response", "raw": raw[:500]}
 
 
 def _letter_to_pdf_base64(letter_text: str) -> str:
@@ -893,209 +977,6 @@ def _qc_letter_pdf(pdf_base64: str) -> dict:
         return {"passed": True, "notes": "QC step skipped due to internal error"}
 
 
-_LETTER_AGENT_SYSTEM_PROMPT = """You are a BD Operations specialist generating a formal off-DTCC
-servicing agent change letter. All required information is provided in the initial message.
-Do not ask any questions — process the full request in one pass.
-
-YOUR PROCESS:
-1. Call lookup_carrier with the carrier name to get the official mailing address, department,
-   and submission requirements from the directory.
-   - If the carrier is not found, use the address supplied in the message (if provided).
-2. Call generate_change_letter with all the details from the message and the address from step 1.
-3. Confirm the letter was generated. Do not reproduce the full letter text in your response."""
-
-
-def _build_carrier_letter_agent():
-    """
-    Create a one-shot Strands carrier letter agent with its own result store.
-    Returns (agent, captured) where captured["letter_text"] is populated by the
-    generate_change_letter tool when the agent calls it.
-
-    A fresh agent + captured dict is created per request so there is no
-    shared mutable state between concurrent calls.
-    """
-    captured = {"letter_text": None}
-    carriers = _load_carrier_directory()
-
-    @tool
-    def lookup_carrier(carrier_name: str) -> dict:
-        """
-        Look up a carrier in the directory by name or common alias.
-        Returns the full carrier record including mailing address, servicing department,
-        fax, and submission requirements. Returns suggestions on partial match.
-        """
-        name_lower = carrier_name.lower().strip()
-        for c in carriers:
-            if c["carrier_name"].lower() == name_lower:
-                return c
-            if any(alias.lower() == name_lower for alias in c.get("aliases", [])):
-                return c
-        matches = []
-        for c in carriers:
-            candidates = [c["carrier_name"]] + c.get("aliases", [])
-            if any(name_lower in x.lower() or x.lower() in name_lower for x in candidates):
-                matches.append({"carrier_name": c["carrier_name"], "aliases": c.get("aliases", [])})
-        if matches:
-            return {"found": False, "message": f"No exact match for '{carrier_name}'.", "suggestions": matches}
-        return {"found": False, "message": f"Carrier '{carrier_name}' not in directory.",
-                "known_carriers": [c["carrier_name"] for c in carriers]}
-
-    @tool
-    def generate_change_letter(
-        carrier_name: str,
-        carrier_department: str,
-        carrier_address_line1: str,
-        carrier_address_line2: str,
-        carrier_city: str,
-        carrier_state: str,
-        carrier_zip: str,
-        client_name: str,
-        client_ssn_last4: str,
-        policy_numbers: str,
-        current_agent_name: str,
-        current_agent_npn: str,
-        new_agent_name: str,
-        new_agent_npn: str,
-        new_bd_name: str,
-        new_bd_dtcc_id: str,
-        reason_for_change: str,
-        requesting_firm_name: str,
-        requesting_firm_contact: str,
-        requesting_firm_phone: str,
-        trailing_commission: str,
-        effective_date_requested: str = "",
-    ) -> dict:
-        """
-        Generate the text of a formal servicing agent change letter addressed to the
-        carrier. policy_numbers should be a comma-separated string. Returns a compact
-        confirmation — the full letter is captured internally and rendered to PDF.
-        """
-        today = date.today().strftime("%B %d, %Y")
-        policy_list = [p.strip() for p in policy_numbers.split(",")]
-
-        addr_lines = [carrier_address_line1]
-        if carrier_address_line2:
-            addr_lines.append(carrier_address_line2)
-        addr_lines.append(f"{carrier_city}, {carrier_state} {carrier_zip}")
-        carrier_address_block = "\n".join(addr_lines)
-
-        policy_ref = ", ".join(policy_list) if len(policy_list) <= 3 else (
-            ", ".join(policy_list[:3]) + f", and {len(policy_list) - 3} additional"
-        )
-        eff_line = (
-            f"Requested Effective Date:  {effective_date_requested}"
-            if effective_date_requested
-            else "Requested Effective Date:  As soon as administratively possible"
-        )
-        tc_map = {
-            "yes":     "The new servicing agent WILL receive trailing commissions on this contract.",
-            "no":      "The new servicing agent will NOT receive trailing commissions on this contract.",
-            "unknown": "Please apply your standard trailing commission arrangement for the new servicing agent.",
-        }
-        tc_line = tc_map.get(trailing_commission.lower(), tc_map["unknown"])
-        SEP = "-" * 72
-
-        letter = f"""{requesting_firm_name}
-{"=" * len(requesting_firm_name)}
-Contact: {requesting_firm_contact}
-Phone:   {requesting_firm_phone}
-Date:    {today}
-
-
-{carrier_name}
-{carrier_department}
-{carrier_address_block}
-
-
-Re:   Request for Servicing Agent / Broker of Record Change
-      Policy Number(s): {policy_ref}
-      Policyholder:     {client_name} (SSN last 4: {client_ssn_last4})
-
-
-Dear {carrier_department},
-
-We are writing on behalf of {new_bd_name} (DTCC Firm ID: {new_bd_dtcc_id}) to formally
-request a change of servicing agent for the above-referenced annuity contract(s).
-This request is made with the full knowledge and authorization of the policy owner.
-
-Please note: A policy inquiry was submitted through DTCC and returned no contracts
-found, indicating these contracts are not currently accessible via the DTCC platform.
-We are therefore submitting this request directly to your company.
-
-{SEP}
-  CONTRACT INFORMATION
-{SEP}
-  Policyholder:           {client_name}
-  SSN (last 4 digits):    {client_ssn_last4}
-  Policy Number(s):       {", ".join(policy_list)}
-
-{SEP}
-  CURRENT SERVICING AGENT (TO BE REMOVED)
-{SEP}
-  Agent Name:             {current_agent_name}
-  National Producer No.:  {current_agent_npn}
-
-{SEP}
-  NEW SERVICING AGENT (TO BE ASSIGNED)
-{SEP}
-  Agent Name:             {new_agent_name}
-  National Producer No.:  {new_agent_npn}
-  Broker/Dealer:          {new_bd_name}
-  DTCC Firm ID:           {new_bd_dtcc_id}
-  {eff_line}
-
-{SEP}
-  TRAILING COMMISSION
-{SEP}
-  {tc_line}
-
-{SEP}
-  REASON FOR CHANGE
-{SEP}
-  {reason_for_change}
-
-We represent that the incoming servicing agent, {new_agent_name} (NPN: {new_agent_npn}),
-holds all required licenses in the applicable jurisdiction(s) and has an active
-appointment with {carrier_name}. Supporting documentation is enclosed if required.
-
-Please process this servicing agent change at your earliest convenience and
-confirm completion in writing to the contact listed above.
-
-If you have any questions or require additional documentation, please do not
-hesitate to contact us.
-
-Sincerely,
-
-
-_________________________________________
-{requesting_firm_contact}
-Authorized Representative, {requesting_firm_name}
-
-
-Enclosures (as applicable):
-  * Copy of policy owner authorization / client signature
-  * Incoming producer's state insurance license(s)
-  * Carrier appointment confirmation for {new_agent_name}
-  * DTCC "no contracts found" response (if available)
-"""
-        captured["letter_text"] = letter
-        return {
-            "generated": True,
-            "carrier": carrier_name,
-            "client": client_name,
-            "policy_count": len(policy_list),
-            "letter_length_chars": len(letter),
-        }
-
-    model = BedrockModel(model_id=_LETTER_MODEL_ID, region_name=_LETTER_REGION)
-    agent = Agent(
-        model=model,
-        tools=[lookup_carrier, generate_change_letter],
-        system_prompt=_LETTER_AGENT_SYSTEM_PROMPT,
-    )
-    return agent, captured
-
-
 @BP.route('/generate-carrier-letter', methods=['POST'])
 def generate_carrier_letter():
     """
@@ -1190,59 +1071,49 @@ def generate_carrier_letter():
             400,
         )
 
-    # Build the address-override note so the agent can use it if needed.
-    addr_note = ""
-    if data.get("carrierAddress"):
-        addr = data["carrierAddress"]
-        parts = [addr["line1"]]
-        if addr.get("line2"):
-            parts.append(addr["line2"])
-        parts.append(f"{addr['city']}, {addr['state']} {addr['zip']}")
-        addr_note = "ADDRESS OVERRIDE (use if carrier not in directory): " + ", ".join(parts)
-
-    dept_note = data.get("carrierDepartment", "")
-
     new_agent = data["newAgent"]
     current_agent = data["currentAgent"]
     client = data["client"]
     firm = data["requestingFirm"]
 
-    initial_message = (
-        f"Generate a servicing agent change letter with the following details.\n\n"
-        f"CARRIER: {carrier_name_req}\n"
-        f"DEPARTMENT OVERRIDE: {dept_note} (blank = use directory default)\n"
-        f"{addr_note}\n\n"
-        f"CLIENT: {client['name']} (SSN last 4: {client['ssnLast4']})\n"
-        f"POLICY NUMBERS: {', '.join(data['policyNumbers'])}\n\n"
-        f"CURRENT SERVICING AGENT (being replaced):\n"
-        f"  Name: {current_agent['name']}\n"
-        f"  NPN:  {current_agent['npn']}\n\n"
-        f"NEW SERVICING AGENT (incoming):\n"
-        f"  Name:     {new_agent['name']}\n"
-        f"  NPN:      {new_agent['npn']}\n"
-        f"  BD Name:  {new_agent['bdName']}\n"
-        f"  DTCC ID:  {new_agent['bdDtccId']}\n\n"
-        f"REASON FOR CHANGE: {data['reasonForChange']}\n"
-        f"TRAILING COMMISSION: {data['trailingCommission']}\n"
-        f"EFFECTIVE DATE: {data.get('effectiveDateRequested', '')} "
-        f"(blank = as soon as administratively possible)\n\n"
-        f"REQUESTING FIRM:\n"
-        f"  Name:    {firm['name']}\n"
-        f"  Contact: {firm['contact']}\n"
-        f"  Phone:   {firm['phone']}\n"
-    )
+    # Build the structured payload for the AgentCore carrier letter runtime.
+    agent_payload = {
+        "carrierName":            carrier_name_req,
+        "carrierDepartment":      data.get("carrierDepartment", ""),
+        "carrierAddress":         data.get("carrierAddress"),
+        "client":                 {"name": client["name"], "ssnLast4": client["ssnLast4"]},
+        "policyNumbers":          data["policyNumbers"],
+        "currentAgent":           {"name": current_agent["name"], "npn": current_agent["npn"]},
+        "newAgent":               {
+            "name":     new_agent["name"],
+            "npn":      new_agent["npn"],
+            "bdName":   new_agent["bdName"],
+            "bdDtccId": new_agent["bdDtccId"],
+        },
+        "reasonForChange":        data["reasonForChange"],
+        "trailingCommission":     data["trailingCommission"],
+        "effectiveDateRequested": data.get("effectiveDateRequested", ""),
+        "requestingFirm":         {"name": firm["name"], "contact": firm["contact"], "phone": firm["phone"]},
+    }
 
-    # Run the Strands agent — it calls lookup_carrier then generate_change_letter.
+    # Dispatch to AgentCore carrier letter runtime.
+    logger.info("Dispatching to AgentCore letter agent — requestId=%s carrier=%s",
+                request_id, carrier_name_req)
     try:
-        agent, captured = _build_carrier_letter_agent()
-        agent(initial_message)
+        agent_response = _call_letter_agent(agent_payload)
     except Exception as e:
-        logger.error("Agent invocation failed — requestId=%s: %s", request_id, e, exc_info=True)
-        return create_error_response("GENERATION_ERROR", f"Agent error: {e}", 500)
+        logger.error("Letter agent dispatch failed — requestId=%s: %s", request_id, e, exc_info=True)
+        return create_error_response("GENERATION_ERROR", f"AgentCore error: {e}", 500)
 
-    letter_text = captured.get("letter_text")
+    if "error" in agent_response:
+        logger.error("Letter agent returned error — requestId=%s: %s", request_id, agent_response)
+        return create_error_response("GENERATION_ERROR",
+                                     agent_response.get("error", "Agent error"), 500)
+
+    letter_text = agent_response.get("letterText")
     if not letter_text:
-        logger.error("Agent completed but generate_change_letter was never called — requestId=%s", request_id)
+        logger.error("Letter agent returned no letterText — requestId=%s response=%s",
+                     request_id, str(agent_response)[:200])
         return create_error_response("GENERATION_ERROR", "Agent did not produce letter text.", 500)
 
     # Render PDF in-memory.
