@@ -10,8 +10,7 @@ const inflightChangesStore = useInflightChangesStore()
 
 onMounted(async () => {
 	await clientStore.loadClients()
-	const clientIds = clientStore.clients.map(c => c.id)
-	await inflightChangesStore.loadInflightChanges(clientIds)
+	await inflightChangesStore.loadInflightChanges()
 })
 </script>
 

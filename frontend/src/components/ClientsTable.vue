@@ -4,6 +4,7 @@ import SortIcon from '@/icons/SortIcon.svg'
 import CirclePlusIcon from '@/icons/CirclePlusIcon.svg'
 import type { Client } from '@/models/Client'
 import { FwbButton, FwbDropdown, FwbInput, FwbListGroup, FwbListGroupItem } from 'flowbite-vue'
+import { RouterLink } from 'vue-router'
 
 type SortableColumn = keyof Client
 type SortDirection = 'asc' | 'desc'
@@ -30,10 +31,9 @@ const filteredClients = computed(() => {
 	if (!query) return props.clients
 
 	return props.clients.filter(client => {
-		const fullName = `${client.firstName} ${client.lastName}`.toLowerCase()
-		return fullName.includes(query) ||
-			client.email.toLowerCase().includes(query) ||
-			client.accountNumber.toLowerCase().includes(query)
+		return client.clientName.toLowerCase().includes(query) ||
+			client.clientId.toLowerCase().includes(query) ||
+			client.ssnLast4.includes(query)
 	})
 })
 
@@ -44,14 +44,8 @@ const sortedClients = computed(() => {
 		const aVal = a[sortColumn.value!]
 		const bVal = b[sortColumn.value!]
 
-		// Handle numeric sorting for numberOfContracts
-		if (sortColumn.value === 'numberOfContracts') {
-			const comparison = (aVal as number) - (bVal as number)
-			return sortDirection.value === 'asc' ? comparison : -comparison
-		}
-
 		// Handle date sorting
-		if (sortColumn.value === 'updatedDate') {
+		if (sortColumn.value === 'assignedAt') {
 			const comparison = new Date(aVal as string).getTime() - new Date(bVal as string).getTime()
 			return sortDirection.value === 'asc' ? comparison : -comparison
 		}
@@ -88,9 +82,6 @@ function formatDate(dateString: string): string {
 						</div>
 					</FwbButton>
 				</RouterLink>
-
-				<FwbDropdown text="Filters" color="light">Filters</FwbDropdown>
-				<FwbDropdown text="Actions" color="light">Actions</FwbDropdown>
 			</div>
 		</div>
 
@@ -101,31 +92,23 @@ function formatDate(dateString: string): string {
 						<th scope="col" class="px-6 py-3">
 							<div class="flex items-center">
 								Name
-								<button type="button" @click="toggleSort('lastName')" class="cursor-pointer">
+								<button type="button" @click="toggleSort('clientName')" class="cursor-pointer">
 									<SortIcon class="w-3 h-3 ms-1.5" />
 								</button>
 							</div>
 						</th>
 						<th scope="col" class="px-6 py-3">
 							<div class="flex items-center">
-								Account Number
-								<button type="button" @click="toggleSort('accountNumber')" class="cursor-pointer">
+								Client ID
+								<button type="button" @click="toggleSort('clientId')" class="cursor-pointer">
 									<SortIcon class="w-3 h-3 ms-1.5" />
 								</button>
 							</div>
 						</th>
 						<th scope="col" class="px-6 py-3">
 							<div class="flex items-center">
-								# of Contracts
-								<button type="button" @click="toggleSort('numberOfContracts')" class="cursor-pointer">
-									<SortIcon class="w-3 h-3 ms-1.5" />
-								</button>
-							</div>
-						</th>
-						<th scope="col" class="px-6 py-3">
-							<div class="flex items-center">
-								Last Updated
-								<button type="button" @click="toggleSort('updatedDate')" class="cursor-pointer">
+								Assigned At
+								<button type="button" @click="toggleSort('assignedAt')" class="cursor-pointer">
 									<SortIcon class="w-3 h-3 ms-1.5" />
 								</button>
 							</div>
@@ -138,33 +121,26 @@ function formatDate(dateString: string): string {
 				<tbody>
 					<tr
 						v-for="(client, index) in sortedClients"
-						:key="client.id"
+						:key="client.clientId"
 						:class="[
 							'bg-[#f8f8f8]',
 							index < sortedClients.length - 1 ? 'border-b dark:border-gray-700 border-gray-200' : ''
 						]"
 					>
 						<th scope="row" class="px-6 py-4 whitespace-nowrap dark:text-white">
-							<div class="font-bold text-gray-900">{{ client.firstName }} {{ client.lastName }}</div>
-							<div class="font-normal text-gray-500">{{ client.email }}</div>
+							<div class="font-bold text-gray-900">{{ client.clientName }}</div>
+							<div class="font-normal text-gray-500">SSN: ***-**-{{ client.ssnLast4 }}</div>
 						</th>
 						<td class="px-6 py-4">
-							{{ client.accountNumber }}
+							{{ client.clientId }}
 						</td>
 						<td class="px-6 py-4">
-							{{ client.numberOfContracts }}
+							{{ formatDate(client.assignedAt) }}
 						</td>
 						<td class="px-6 py-4">
-							{{ formatDate(client.updatedDate) }}
-						</td>
-						<td class="px-6 py-4">
-							<FwbDropdown text="Actions" color="light">
-								<FwbListGroup>
-									<FwbListGroupItem>View Details</FwbListGroupItem>
-									<FwbListGroupItem>Edit</FwbListGroupItem>
-									<FwbListGroupItem>Delete</FwbListGroupItem>
-								</FwbListGroup>
-							</FwbDropdown>
+							<RouterLink :to="`/initiate-exchange/${client.clientId}`">
+								<FwbButton class="cursor-pointer">Initiate Transfer</FwbButton>
+							</RouterLink>
 						</td>
 					</tr>
 				</tbody>

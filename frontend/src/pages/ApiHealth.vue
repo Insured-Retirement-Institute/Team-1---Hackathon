@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { checkBrokerDealerHealth, checkClearingHouseHealth, checkCarrierHealth, checkEventSourceHealth } from '@/api/Api'
+import { checkBrokerDealerHealth, checkClearingHouseHealth, checkCarrierHealth, checkEventSourceHealth, checkDistributorHealth } from '@/api/Api'
 
 interface HealthStatus {
 	name: string
@@ -13,7 +13,8 @@ const healthStatuses = ref<HealthStatus[]>([
 	{ name: 'Broker-Dealer API', status: 'loading' },
 	{ name: 'Clearinghouse API', status: 'loading' },
 	{ name: 'Insurance Carrier API', status: 'loading' },
-	{ name: 'EventSource API', status: 'loading' }
+	{ name: 'EventSource API', status: 'loading' },
+	{ name: 'Distributor API', status: 'loading' }
 ])
 
 const isRefreshing = ref(false)
@@ -53,7 +54,8 @@ async function refreshAllHealth() {
 		checkHealth(0, checkBrokerDealerHealth),
 		checkHealth(1, checkClearingHouseHealth),
 		checkHealth(2, checkCarrierHealth),
-		checkHealth(3, checkEventSourceHealth)
+		checkHealth(3, checkEventSourceHealth),
+		checkHealth(4, checkDistributorHealth)
 	])
 	isRefreshing.value = false
 }

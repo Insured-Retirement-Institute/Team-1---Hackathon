@@ -15,9 +15,11 @@
     "format": "oxfmt src/"
   },
   "dependencies": {
+    "@types/lodash": "^4.17.24",
     "@vueuse/core": "^14.2.1",
     "flowbite": "^4.0.1",
     "flowbite-vue": "^0.2.2",
+    "lodash": "^4.17.23",
     "pinia": "^3.0.4",
     "ulid": "^3.0.2",
     "vite-svg-loader": "^5.1.0",

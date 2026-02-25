@@ -2,9 +2,12 @@ import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import { AccountType, ContractStatus, OwnershipType, PlanType, type ContractRecord } from '@/models/ContractRecord'
 import { useLoaderStore } from '@/stores/useLoaderStore'
-import { brokerDealerApi, insuranceCarrierApi } from '@/api/Api'
+import { brokerDealerApi, distributorApi, insuranceCarrierApi } from '@/api/Api'
 import { isClientResponse, type DetailedPolicyInfo, type PolicyInquiryRequest } from '@/models/ClearinghouseApi'
-import { useEventSource } from '@/utils/useEventSource'
+import { ulid } from 'ulid'
+import { groupBy } from 'lodash'
+import type { Client } from '@/models/Client'
+import { useClientStore } from './useClientStore'
 
 const CARRIER_PRODUCTS: Record<string, string> = {
 	'Allianz Life': 'Allianz 222® Annuity',
@@ -191,10 +194,14 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 	const searchContracts = ref<ContractRecord[]>([])
 	const dtccContractResults = ref<ContractRecord[]>([])
 	const carrierContractResults = ref<ContractRecord[]>([])
-	const clientSearch = ref<ClientSearchInfo>({
-		firstName: '',
-		lastName: '',
-		ssn: ''
+	const clientSearch = ref<Client>({
+		clientName: '',
+		ssnLast4: '',
+		clientId: '',
+		pk: '',
+		sk: '',
+		type: '',
+		assignedAt: ''
 	})
 
 	function resetSearchContracts() {
@@ -213,7 +220,15 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 		resetSearchContracts()
 		resetDtccContractResults()
 		resetCarrierContractResults()
-		clientSearch.value = { firstName: '', lastName: '', ssn: '' }
+		clientSearch.value = {
+			clientId: '',
+			clientName: '',
+			ssnLast4: '',
+			pk: '',
+			sk: '',
+			type: '',
+			assignedAt: ''
+		}
 	}
 
 	function createEmptyContract(): ContractRecord {
@@ -247,6 +262,13 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 		const loaderStore = useLoaderStore()
 		loaderStore.open('Locating Contracts')
 
+		if (!clientSearch.value.clientId) {
+			await distributorApi.createClient({
+				clientName: clientSearch.value.clientName,
+				ssnLast4: clientSearch.value.ssnLast4
+			})
+		}
+
 		const contractNumbers = searchContracts.value
 			.filter(c => c.contractNumber.trim() !== '')
 			.map(c => c.contractNumber)
@@ -264,8 +286,8 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 					}
 				},
 				client: {
-					clientName: `${clientSearch.value.firstName} ${clientSearch.value.lastName}`.trim(),
-					ssn: clientSearch.value.ssn,
+					clientName: clientSearch.value.clientName.trim(),
+					ssn: clientSearch.value.ssnLast4,
 					policyNumbers: contractNumbers
 				}
 			}
@@ -299,39 +321,110 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 
 	async function initiateCarrierSearch(): Promise<void> {
 		const loaderStore = useLoaderStore()
-		loaderStore.open('Checking with carriers')
+
+		const tasks = []
+
+		const autoLookup = dtccContractResults.value.filter(r => r.dtccResolved)
+		const manualLookup = dtccContractResults.value.filter(r => !r.dtccResolved)
+
+		const groupedManualLookup = groupBy(manualLookup, item => item.carrierName)
+
+		if (autoLookup.length)
+			tasks.push({
+				id: 'validate',
+				label: 'Validating contracts with carriers'
+			})
+
+		if (manualLookup.length) {}
+			tasks.push(...Object.values(groupedManualLookup).map(v => ({
+				id: v[0]?.carrierName ?? '',
+				label: `Generating ${v[0]?.carrierName} letter`
+			})))
+
+		loaderStore.open('Validating', tasks)
 
 		const selectedRecords = dtccContractResults.value.filter(r => r.selected)
 		const policyNumbers = selectedRecords.map(r => r.contractNumber)
 
-			await new Promise(resolve => setTimeout(resolve, 3000))
+		await new Promise(resolve => setTimeout(resolve, 3000))
+
+		let requestId = ''
 
 		try {
-			// Try API call
-			const response = await insuranceCarrierApi.validatePolicies({
-				policies: policyNumbers
+			const result = await distributorApi.createRequest('12345678', {
+				clientId: clientSearch.value.clientId,
+				contracts: policyNumbers,
+				receivingBrokerId: 'BD002',
 			})
 
-			if (response.client.policies && response.client.policies.length > 0) {
-				// Map API response to ContractRecords with additional carrier info
-				carrierContractResults.value = response.client.policies.map(policy => {
-					const record = mapDetailedPolicyToContractRecord(policy, true)
-					// Try to find matching DTCC record to preserve owner name
-					const matchingDtcc = selectedRecords.find(r => r.contractNumber === policy.policyNumber)
-					if (matchingDtcc?.ownerName) {
-						record.ownerName = matchingDtcc.ownerName
-					}
-					return record
-				})
-			} else {
-				// Fallback to fake data
-				carrierContractResults.value = selectedRecords.map(generateFakeCarrierResult)
-			}
-		} catch (error) {
-			console.warn('API call failed, using fake data:', error)
-			// Fallback to fake data on API error
-			carrierContractResults.value = selectedRecords.map(generateFakeCarrierResult)
+			requestId = result.request.transactionId
+		} catch {
+
+		} finally {
+
 		}
+
+		if (autoLookup.length) {
+			try {
+				// Try API call
+				const response = await insuranceCarrierApi.validatePolicies({
+					policies: policyNumbers
+				})
+
+				if (response.client.policies && response.client.policies.length > 0) {
+					// Map API response to ContractRecords with additional carrier info
+					carrierContractResults.value = response.client.policies.map(policy => {
+						const record = mapDetailedPolicyToContractRecord(policy, true)
+						// Try to find matching DTCC record to preserve owner name
+						const matchingDtcc = selectedRecords.find(r => r.contractNumber === policy.policyNumber)
+						if (matchingDtcc?.ownerName) {
+							record.ownerName = matchingDtcc.ownerName
+						}
+						return record
+					})
+				} else {
+					// Fallback to fake data
+					carrierContractResults.value = selectedRecords.map(generateFakeCarrierResult)
+				}
+			} catch (error) {
+				console.warn('API call failed, using fake data:', error)
+				// Fallback to fake data on API error
+				carrierContractResults.value = selectedRecords.map(generateFakeCarrierResult)
+			} finally {
+				loaderStore.completeTask('validate')
+			}
+		}
+
+		for (const group of Object.values(groupedManualLookup)) {
+			try {
+				await brokerDealerApi.generateCarrierLetter({
+					requestId: ulid(),
+					carrierName: group?.[0]?.carrierName ?? '',
+					client: {
+						fullName: ''
+					},
+					policyNumbers: group.map(g => g.contractNumber),
+					currentAgent: {
+						name: ''
+					},
+					newAgent: {
+						name: ''
+					},
+					reasonForChange: '',
+					trailingCommission: 'yes',
+					requestingFirm: {
+						firmName: '',
+						firmId: undefined
+					}
+				})
+			} catch {
+
+			} finally {
+				loaderStore.completeTask(group?.[0]?.carrierName ?? '')
+			}
+		}
+
+		await new Promise(resolve => setTimeout(resolve, 500))
 
 		loaderStore.close()
 	}
