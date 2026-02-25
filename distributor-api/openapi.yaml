@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Distributor API
-  description: Agent/Client/Contract/Transaction management API for broker-dealer changes
+  description: Agent/Client/Contract/Request management API for broker-dealer changes
   version: 1.0.0
   contact:
     name: API Support
@@ -104,22 +104,22 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /agent/{npn}/transactions:
+  /agent/{npn}/requests:
     get:
-      summary: Get all transactions for an agent
-      operationId: getAgentTransactions
+      summary: Get all requests for an agent
+      operationId: getAgentRequests
       tags:
         - Agents
-        - Transactions
+        - Requests
       parameters:
         - $ref: '#/components/parameters/npn'
       responses:
         '200':
-          description: List of transactions for the agent
+          description: List of requests for the agent
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GetAgentTransactionsResponse'
+                $ref: '#/components/schemas/GetAgentRequestsResponse'
         '404':
           description: Agent not found
           content:
@@ -128,11 +128,11 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
 
     post:
-      summary: Create a new transaction for an agent
-      operationId: createTransaction
+      summary: Create a new request for an agent
+      operationId: createRequest
       tags:
         - Agents
-        - Transactions
+        - Requests
       parameters:
         - $ref: '#/components/parameters/npn'
       requestBody:
@@ -140,14 +140,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateTransactionRequest'
+              $ref: '#/components/schemas/CreateRequestRequest'
       responses:
         '201':
-          description: Transaction created successfully
+          description: Request created successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CreateTransactionResponse'
+                $ref: '#/components/schemas/CreateRequestResponse'
         '400':
           description: Invalid request (missing fields or client not assigned to agent)
           content:
@@ -256,9 +256,9 @@ components:
         - sk
         - type
         - npn
-        - agentName
+        - producerName
         - firmId
-        - firmName
+        - name
         - status
         - createdAt
       properties:
@@ -277,13 +277,13 @@ components:
           type: string
           description: National Producer Number
           example: "12345678"
-        agentName:
+        producerName:
           type: string
           example: "Sarah Johnson"
         firmId:
           type: string
           example: "BD001"
-        firmName:
+        name:
           type: string
           example: "Premier Financial Services"
         status:
@@ -378,8 +378,8 @@ components:
         - cusip
         - issueState
         - status
-        - systematicWithdrawal
-        - commissionTrails
+        - hasSystematicWithdrawal
+        - hasTrailingCommission
       properties:
         pk:
           type: string
@@ -419,22 +419,22 @@ components:
         status:
           type: string
           enum: [Active, Surrendered, Death Claim Pending]
-        systematicWithdrawal:
+        hasSystematicWithdrawal:
           type: boolean
-        commissionTrails:
+        hasTrailingCommission:
           type: boolean
 
-    Transaction:
+    Request:
       type: object
       required:
         - pk
         - sk
         - type
-        - transactionId
+        - requestId
         - clientId
         - clientName
         - contracts
-        - transactionType
+        - requestType
         - status
         - receivingBrokerId
         - deliveringBrokerId
@@ -446,11 +446,11 @@ components:
           description: Partition key (AGENT#{npn})
         sk:
           type: string
-          description: Sort key (TRANSACTION#{transactionId})
+          description: Sort key (REQUEST#{requestId})
         type:
           type: string
-          enum: [Transaction]
-        transactionId:
+          enum: [Request]
+        requestId:
           type: string
           format: uuid
         clientId:
@@ -462,7 +462,7 @@ components:
           items:
             type: string
           description: Array of policy numbers
-        transactionType:
+        requestType:
           type: string
           enum: [BD_CHANGE]
         status:
@@ -503,16 +503,16 @@ components:
           type: integer
           minimum: 0
 
-    GetAgentTransactionsResponse:
+    GetAgentRequestsResponse:
       type: object
       required:
-        - transactions
+        - requests
         - count
       properties:
-        transactions:
+        requests:
           type: array
           items:
-            $ref: '#/components/schemas/Transaction'
+            $ref: '#/components/schemas/Request'
         count:
           type: integer
           minimum: 0
@@ -559,7 +559,7 @@ components:
         client:
           $ref: '#/components/schemas/Client'
 
-    CreateTransactionRequest:
+    CreateRequestRequest:
       type: object
       required:
         - clientId
@@ -568,34 +568,34 @@ components:
       properties:
         clientId:
           type: string
-          description: ID of the client for this transaction
+          description: ID of the client for this request
           example: "C001"
         contracts:
           type: array
           items:
             type: string
-          description: Array of policy numbers to include in the transaction
+          description: Array of policy numbers to include in the request
           example: ["POL-001-2024", "POL-002-2024"]
         receivingBrokerId:
           type: string
           description: Broker-dealer ID receiving the transfer
           example: "BD002"
-        transactionType:
+        requestType:
           type: string
           enum: [BD_CHANGE]
           default: BD_CHANGE
 
-    CreateTransactionResponse:
+    CreateRequestResponse:
       type: object
       required:
         - message
-        - transaction
+        - request
       properties:
         message:
           type: string
-          example: "Transaction created"
-        transaction:
-          $ref: '#/components/schemas/Transaction'
+          example: "Request created"
+        request:
+          $ref: '#/components/schemas/Request'
 
 tags:
   - name: Health
@@ -606,5 +606,5 @@ tags:
     description: Client management operations
   - name: Contracts
     description: Contract/policy operations
-  - name: Transactions
-    description: BD change transaction operations
+  - name: Requests
+    description: BD change request operations
