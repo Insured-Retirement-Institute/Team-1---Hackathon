@@ -34,15 +34,16 @@ from routes.insurance_carrier import (
     _call_carrier_agent,
     CARRIER_CONFIGS,
 )
+from lib.utils.dynamodb_utils import put_item, get_item, scan_items
 
 logger = logging.getLogger(__name__)
 
 # Where to POST async results. Set via env var; blank = log only (no callback).
 CALLBACK_BASE_URL = os.environ.get("CALLBACK_BASE_URL", "")
 
-# In-memory store for received servicing agent change responses.
-# Keyed by requestId. Production would use DynamoDB.
-_change_responses = {}
+# DynamoDB table for storing received async responses
+REPLY_TABLE = "distributor"
+REPLY_PK_PREFIX = "CHANGE_REPLY#"
 
 # ── Blueprints ──────────────────────────────────────────────────────────────
 
@@ -307,19 +308,22 @@ def reply_servicing_agent_change():
     if not data:
         return error_response("VALIDATION_ERROR", "Request body is required", request_id)
 
-    # Store the response keyed by requestId
+    # Store the response in DynamoDB
     resp_request_id = data.get("requestId", request_id)
-    _change_responses[resp_request_id] = {
-        "receivedAt": datetime.utcnow().isoformat() + "Z",
+    now = datetime.utcnow().isoformat() + "Z"
+    item = {
+        "pk": f"{REPLY_PK_PREFIX}{resp_request_id}",
+        "sk": "RESPONSE",
         "requestId": resp_request_id,
-        "response": data,
+        "receivedAt": now,
+        "response": json.dumps(data),
+        "carrier": data.get("carrier", {}).get("carrierName", ""),
+        "determination": data.get("policies", [{}])[0].get("status", "") if data.get("policies") else "",
+        "context": data.get("context", ""),
     }
+    put_item(REPLY_TABLE, item)
 
-    logger.info(
-        "v0 servicing agent change reply stored — requestId=%s (total stored: %d)",
-        resp_request_id,
-        len(_change_responses),
-    )
+    logger.info("v0 servicing agent change reply stored in DynamoDB — requestId=%s", resp_request_id)
     return acknowledgment_response(
         request_id,
         "Servicing agent change response received successfully",
@@ -332,9 +336,28 @@ def list_change_responses():
     """
     GET /v0/servicing-agent-changes/reply
 
-    List all received servicing agent change responses.
+    List all received servicing agent change responses from DynamoDB.
     """
-    return ok_response(list(_change_responses.values()))
+    from boto3.dynamodb.conditions import Attr
+    items = scan_items(REPLY_TABLE, filter_expression=Attr("pk").begins_with(REPLY_PK_PREFIX))
+    results = []
+    for item in items:
+        record = {
+            "requestId": item.get("requestId"),
+            "receivedAt": item.get("receivedAt"),
+            "carrier": item.get("carrier"),
+            "determination": item.get("determination"),
+            "context": item.get("context", ""),
+        }
+        # Include full response if stored
+        raw = item.get("response")
+        if raw:
+            try:
+                record["response"] = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                record["response"] = raw
+        results.append(record)
+    return ok_response(results)
 
 
 @servicing_agent_changes_bp.route("/reply/<request_id>", methods=["GET"])
@@ -344,13 +367,26 @@ def get_change_response(request_id):
 
     Retrieve a specific servicing agent change response by requestId.
     """
-    record = _change_responses.get(request_id)
-    if not record:
+    item = get_item(REPLY_TABLE, f"{REPLY_PK_PREFIX}{request_id}", "RESPONSE")
+    if not item:
         return error_response(
             "NOT_FOUND",
             f"No response found for requestId: {request_id}",
             status=404,
         )
+    record = {
+        "requestId": item.get("requestId"),
+        "receivedAt": item.get("receivedAt"),
+        "carrier": item.get("carrier"),
+        "determination": item.get("determination"),
+        "context": item.get("context", ""),
+    }
+    raw = item.get("response")
+    if raw:
+        try:
+            record["response"] = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            record["response"] = raw
     return ok_response(record)
 
 
