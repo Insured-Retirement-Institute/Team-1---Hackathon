@@ -17,7 +17,7 @@ const router = createRouter({
 			path: '/initiate-exchange',
 			component: () => import('@/pages/InitiateExchange.vue'),
 			meta: {
-				title: 'Lookup Contracts',
+				title: 'Enter Contract Details for Client',
 				next: {
 					route: '/dtcc-results',
 					handler: async () => {
@@ -31,7 +31,7 @@ const router = createRouter({
 			path: '/dtcc-results',
 			component: () => import('@/pages/DtccResults.vue'),
 			meta: {
-				title: 'DTCC Results',
+				title: 'Contract Results from DTCC',
 				next: {
 					route: '/carrier-results',
 					handler: async () => {

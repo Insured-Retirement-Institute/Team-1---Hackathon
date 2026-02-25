@@ -6,9 +6,15 @@ let sourceInstance : EventSource | undefined = undefined
 
 const source = () => {
 	if (sourceInstance === undefined) {
-		sourceInstance = new EventSource('https://sse.dev/test?interval=5')
+		console.log(`connecting to ${import.meta.env.VITE_EVENTSOURCE}`)
+		sourceInstance = new EventSource(import.meta.env.VITE_EVENTSOURCE)
+
+		sourceInstance.onerror = (error) => {
+			console.log(error)
+		}
 
 		sourceInstance.onmessage = event => {
+			console.log(event)
 			const data = JSON.parse(event.data)
 			console.log(data)
 

@@ -181,6 +181,117 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /extract-policy-from-pdf:
+    post:
+      summary: Extract policy data from a carrier statement PDF
+      description: |
+        Accept a Base64-encoded carrier policy statement PDF and extract structured
+        policy and client data using Claude's native PDF understanding via Amazon Bedrock.
+
+        The extracted data is returned in the standard `policyInquiryResponse` format,
+        allowing a broker-dealer to populate a BD Change request from a scanned or
+        downloaded account statement without calling a carrier API directly.
+
+        **Processing:**
+        - Claude reads the PDF layout natively — no OCR library is required
+        - All policies found in the document are extracted and returned
+        - Field extraction handles individual, joint, trust, and entity account types
+
+        **Response codes:**
+        - `EXTRACTED` — extraction succeeded; `payload.policyInquiryResponse` is populated
+      operationId: extractPolicyFromPdf
+      parameters:
+        - name: transactionId
+          in: header
+          required: true
+          description: Unique transaction identifier for request correlation
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PdfExtractionRequest'
+            example:
+              requestId: "req-abc-123"
+              pdfBase64: "JVBERi0xLjQg..."
+      responses:
+        '200':
+          description: Policy data extracted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardResponse'
+              example:
+                code: "EXTRACTED"
+                message: "Policy data extracted from document"
+                transactionId: "123e4567-e89b-12d3-a456-426614174000"
+                processingMode: "immediate"
+                payload:
+                  policyInquiryResponse:
+                    requestingFirm:
+                      firmName: "Strategic Wealth Advisors"
+                      firmId: null
+                      servicingAgent:
+                        agentName: "Amanda Foster"
+                        npn: "27530463"
+                    producerValidation:
+                      agentName: "Amanda Foster"
+                      npn: "27530463"
+                      errors: []
+                    client:
+                      clientName: "Joshua Lee"
+                      ssnLast4: "8122"
+                      policies:
+                        - policyNumber: "ATH-100053"
+                          carrierName: "Athene Annuity"
+                          accountType: "individual"
+                          planType: "rothIra"
+                          ownership: "single"
+                          productName: "Athene MYG 5 MVA"
+                          cusip: null
+                          trailingCommission: false
+                          contractStatus: "active"
+                          withdrawalStructure:
+                            systematicInPlace: false
+                          errors: []
+                    enums:
+                      accountType: ["individual", "joint", "trust", "custodial", "entity"]
+                      planType: ["nonQualified", "rothIra", "traditionalIra", "sep", "simple"]
+        '400':
+          description: Bad request — missing or invalid fields, or unreadable PDF
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                missing_fields:
+                  summary: Missing required fields
+                  value:
+                    code: "VALIDATION_ERROR"
+                    message: "Missing required fields: pdfBase64"
+                invalid_pdf:
+                  summary: Invalid base64 or unreadable PDF
+                  value:
+                    code: "INVALID_PDF"
+                    message: "Invalid base64 encoding: ..."
+                missing_header:
+                  summary: Missing transactionId header
+                  value:
+                    code: "MISSING_HEADER"
+                    message: "transactionId header is required"
+        '500':
+          description: Extraction failed — Bedrock error or model returned non-JSON
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: "EXTRACTION_ERROR"
+                message: "Model returned non-JSON output. Check the PDF is a readable policy statement."
+
   /query-status/{transactionId}:
     get:
       summary: Query transaction status
@@ -216,6 +327,25 @@ paths:
 
 components:
   schemas:
+    PdfExtractionRequest:
+      type: object
+      required:
+        - requestId
+        - pdfBase64
+      additionalProperties: false
+      properties:
+        requestId:
+          type: string
+          description: Caller-supplied request identifier. Echoed in logs for correlation with downstream systems.
+          example: "req-abc-123"
+        pdfBase64:
+          type: string
+          description: |
+            Base64-encoded bytes of the carrier policy statement PDF.
+            Standard or URL-safe encoding is accepted.
+            The PDF is passed directly to Claude via Amazon Bedrock as a native document block
+            — no intermediate text extraction is performed.
+
     PolicyInquiryRequest:
       type: object
       required:

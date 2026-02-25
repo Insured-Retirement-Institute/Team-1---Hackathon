@@ -224,8 +224,12 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 		}
 	}
 
-	function addSearchContract() {
-		searchContracts.value.push(createEmptyContract())
+	function addSearchContract(options: Partial<ContractRecord> = {}) {
+		const contract = createEmptyContract()
+		searchContracts.value.push({
+			...contract,
+			...options
+		})
 	}
 
 	function removeSearchContract(id: string | number) {
@@ -241,12 +245,9 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 			.filter(c => c.contractNumber.trim() !== '')
 			.map(c => c.contractNumber)
 
-		// await new Promise(resolve => setTimeout(resolve, 2000))
-		await useEventSource().waitForEvent(() => true)
+		await new Promise(resolve => setTimeout(resolve, 2000))
 
 		try {
-			// Try API call
-			const transactionId = crypto.randomUUID()
 			const request: PolicyInquiryRequest = {
 				requestingFirm: {
 					firmName: 'Demo Firm',
@@ -263,7 +264,7 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 				}
 			}
 
-			const response = await brokerDealerApi.submitPolicyInquiryRequest(transactionId, request)
+			const response = await brokerDealerApi.submitPolicyInquiryRequest(request)
 
 
 			if (isClientResponse(response.payload?.client) && response.payload?.client.policies && response.payload.client.policies.length > 0) {
