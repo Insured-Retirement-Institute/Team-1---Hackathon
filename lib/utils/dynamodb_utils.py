@@ -1,11 +1,12 @@
 """
-DynamoDB utility functions for carrier Lambda functions.
-Provides reusable methods for interacting with carrier DynamoDB tables.
+DynamoDB utility functions for hackathon Lambda functions.
+Provides generic, reusable methods for interacting with DynamoDB tables
+across different entities in the pipeline.
 """
 
 import boto3
 from boto3.dynamodb.conditions import Key, Attr
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union
 from decimal import Decimal
 import json
 
@@ -36,272 +37,199 @@ def get_table(table_name: str, region: str = "us-east-1"):
     return dynamodb.Table(table_name)
 
 
-def scan_all_policies(table_name: str, region: str = "us-east-1") -> List[Dict]:
-    """
-    Scan all policies from a carrier table.
-
-    Args:
-        table_name: Name of the DynamoDB table ('carrier' or 'carrier-2')
-        region: AWS region
-
-    Returns:
-        List of policy records
-    """
-    table = get_table(table_name, region)
-    items = []
-
-    response = table.scan()
-    items.extend(response.get("Items", []))
-
-    while "LastEvaluatedKey" in response:
-        response = table.scan(ExclusiveStartKey=response["LastEvaluatedKey"])
-        items.extend(response.get("Items", []))
-
-    return items
-
-
-def get_policy_by_number(
+def get_item(
     table_name: str,
-    policy_number: str,
+    pk: str,
+    sk: Optional[str] = None,
     region: str = "us-east-1"
 ) -> Optional[Dict]:
     """
-    Get a policy by its policy number.
+    Get a single item by primary key.
 
     Args:
         table_name: Name of the DynamoDB table
-        policy_number: The policy number (e.g., 'ATH-100001')
+        pk: Partition key value
+        sk: Sort key value (optional, required if table has sort key)
         region: AWS region
 
     Returns:
-        Policy record or None if not found
+        Item or None if not found
     """
     table = get_table(table_name, region)
 
-    response = table.query(
-        KeyConditionExpression=Key("pk").eq(f"POLICY#{policy_number}")
-    )
+    key = {"pk": pk}
+    if sk is not None:
+        key["sk"] = sk
 
-    items = response.get("Items", [])
-    return items[0] if items else None
-
-
-def get_policy_by_transaction(
-    table_name: str,
-    policy_number: str,
-    transaction_id: str,
-    region: str = "us-east-1"
-) -> Optional[Dict]:
-    """
-    Get a specific policy transaction.
-
-    Args:
-        table_name: Name of the DynamoDB table
-        policy_number: The policy number
-        transaction_id: The transaction ID
-        region: AWS region
-
-    Returns:
-        Policy record or None if not found
-    """
-    table = get_table(table_name, region)
-
-    response = table.get_item(
-        Key={
-            "pk": f"POLICY#{policy_number}",
-            "sk": f"TRANSACTION#{transaction_id}"
-        }
-    )
-
+    response = table.get_item(Key=key)
     return response.get("Item")
 
 
-def query_policies_by_client(
+def query_items(
     table_name: str,
-    client_name: str,
+    pk: str,
+    sk_condition: Optional[Any] = None,
+    filter_expression: Optional[Any] = None,
     region: str = "us-east-1"
 ) -> List[Dict]:
     """
-    Query policies by client name using a scan with filter.
+    Query items by partition key with optional sort key condition and filter.
 
     Args:
         table_name: Name of the DynamoDB table
-        client_name: Client name to search for
+        pk: Partition key value
+        sk_condition: Optional sort key condition (e.g., Key("sk").begins_with("PREFIX#"))
+        filter_expression: Optional filter expression (e.g., Attr("status").eq("Active"))
         region: AWS region
 
     Returns:
-        List of matching policy records
+        List of matching items
     """
     table = get_table(table_name, region)
     items = []
 
-    response = table.scan(
-        FilterExpression=Attr("clientName").eq(client_name)
-    )
+    key_condition = Key("pk").eq(pk)
+    if sk_condition is not None:
+        key_condition = key_condition & sk_condition
+
+    query_kwargs = {"KeyConditionExpression": key_condition}
+    if filter_expression is not None:
+        query_kwargs["FilterExpression"] = filter_expression
+
+    response = table.query(**query_kwargs)
     items.extend(response.get("Items", []))
 
     while "LastEvaluatedKey" in response:
-        response = table.scan(
-            FilterExpression=Attr("clientName").eq(client_name),
-            ExclusiveStartKey=response["LastEvaluatedKey"]
-        )
+        query_kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+        response = table.query(**query_kwargs)
         items.extend(response.get("Items", []))
 
     return items
 
 
-def query_policies_by_ssn_last4(
+def scan_items(
     table_name: str,
-    ssn_last4: str,
+    filter_expression: Optional[Any] = None,
     region: str = "us-east-1"
 ) -> List[Dict]:
     """
-    Query policies by SSN last 4 digits using a scan with filter.
+    Scan all items with optional filter expression.
 
     Args:
         table_name: Name of the DynamoDB table
-        ssn_last4: Last 4 digits of SSN
+        filter_expression: Optional filter expression (e.g., Attr("clientName").eq("John"))
         region: AWS region
 
     Returns:
-        List of matching policy records
+        List of matching items
     """
     table = get_table(table_name, region)
     items = []
 
-    response = table.scan(
-        FilterExpression=Attr("ssnLast4").eq(ssn_last4)
-    )
+    scan_kwargs = {}
+    if filter_expression is not None:
+        scan_kwargs["FilterExpression"] = filter_expression
+
+    response = table.scan(**scan_kwargs)
     items.extend(response.get("Items", []))
 
     while "LastEvaluatedKey" in response:
-        response = table.scan(
-            FilterExpression=Attr("ssnLast4").eq(ssn_last4),
-            ExclusiveStartKey=response["LastEvaluatedKey"]
-        )
+        scan_kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+        response = table.scan(**scan_kwargs)
         items.extend(response.get("Items", []))
 
     return items
 
 
-def query_policies_by_status(
+def put_item(
     table_name: str,
-    status: str,
-    region: str = "us-east-1"
-) -> List[Dict]:
-    """
-    Query policies by current status.
-
-    Args:
-        table_name: Name of the DynamoDB table
-        status: Status to filter by (e.g., 'CARRIER_APPROVED')
-        region: AWS region
-
-    Returns:
-        List of matching policy records
-    """
-    table = get_table(table_name, region)
-    items = []
-
-    response = table.scan(
-        FilterExpression=Attr("currentStatus").eq(status)
-    )
-    items.extend(response.get("Items", []))
-
-    while "LastEvaluatedKey" in response:
-        response = table.scan(
-            FilterExpression=Attr("currentStatus").eq(status),
-            ExclusiveStartKey=response["LastEvaluatedKey"]
-        )
-        items.extend(response.get("Items", []))
-
-    return items
-
-
-def put_policy(
-    table_name: str,
-    policy: Dict,
+    item: Dict,
     region: str = "us-east-1"
 ) -> Dict:
     """
-    Put a policy record into the table.
+    Put an item into the table.
 
     Args:
         table_name: Name of the DynamoDB table
-        policy: Policy record to insert
+        item: Item to insert (must include pk and sk if table requires it)
         region: AWS region
 
     Returns:
         DynamoDB response
     """
     table = get_table(table_name, region)
-    return table.put_item(Item=policy)
+    return table.put_item(Item=item)
 
 
-def update_policy_status(
+def update_item(
     table_name: str,
-    policy_number: str,
-    transaction_id: str,
-    new_status: str,
-    notes: Optional[str] = None,
+    pk: str,
+    sk: Optional[str] = None,
+    updates: Optional[Dict[str, Any]] = None,
+    update_expression: Optional[str] = None,
+    expression_values: Optional[Dict[str, Any]] = None,
+    expression_names: Optional[Dict[str, str]] = None,
     region: str = "us-east-1"
 ) -> Dict:
     """
-    Update the status of a policy and append to status history.
+    Update an item. Supports either simple updates dict or custom expressions.
 
     Args:
         table_name: Name of the DynamoDB table
-        policy_number: The policy number
-        transaction_id: The transaction ID
-        new_status: New status value
-        notes: Optional notes for the status change
+        pk: Partition key value
+        sk: Sort key value (optional)
+        updates: Simple dict of field names to new values (auto-builds expression)
+        update_expression: Custom UpdateExpression string
+        expression_values: ExpressionAttributeValues for custom expression
+        expression_names: ExpressionAttributeNames for custom expression
         region: AWS region
 
     Returns:
-        DynamoDB response
+        DynamoDB response with updated item
     """
-    from datetime import datetime, timezone
-
     table = get_table(table_name, region)
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    history_item = {
-        "status": new_status,
-        "timestamp": timestamp
-    }
-    if notes:
-        history_item["notes"] = notes
+    key = {"pk": pk}
+    if sk is not None:
+        key["sk"] = sk
 
-    response = table.update_item(
-        Key={
-            "pk": f"POLICY#{policy_number}",
-            "sk": f"TRANSACTION#{transaction_id}"
-        },
-        UpdateExpression="SET currentStatus = :status, updatedAt = :updated, statusHistory = list_append(statusHistory, :history)",
-        ExpressionAttributeValues={
-            ":status": new_status,
-            ":updated": timestamp,
-            ":history": [history_item]
-        },
-        ReturnValues="ALL_NEW"
-    )
+    update_kwargs = {"Key": key, "ReturnValues": "ALL_NEW"}
 
-    return response
+    if updates:
+        # Build expression from simple updates dict
+        update_parts = []
+        expr_values = {}
+        for i, (field, value) in enumerate(updates.items()):
+            if field not in ("pk", "sk"):
+                update_parts.append(f"{field} = :val{i}")
+                expr_values[f":val{i}"] = value
+        update_kwargs["UpdateExpression"] = "SET " + ", ".join(update_parts)
+        update_kwargs["ExpressionAttributeValues"] = expr_values
+    else:
+        # Use custom expression
+        if update_expression:
+            update_kwargs["UpdateExpression"] = update_expression
+        if expression_values:
+            update_kwargs["ExpressionAttributeValues"] = expression_values
+        if expression_names:
+            update_kwargs["ExpressionAttributeNames"] = expression_names
+
+    return table.update_item(**update_kwargs)
 
 
-def delete_policy(
+def delete_item(
     table_name: str,
-    policy_number: str,
-    transaction_id: str,
+    pk: str,
+    sk: Optional[str] = None,
     region: str = "us-east-1"
 ) -> Dict:
     """
-    Delete a policy record.
+    Delete an item.
 
     Args:
         table_name: Name of the DynamoDB table
-        policy_number: The policy number
-        transaction_id: The transaction ID
+        pk: Partition key value
+        sk: Sort key value (optional)
         region: AWS region
 
     Returns:
@@ -309,78 +237,73 @@ def delete_policy(
     """
     table = get_table(table_name, region)
 
-    return table.delete_item(
-        Key={
-            "pk": f"POLICY#{policy_number}",
-            "sk": f"TRANSACTION#{transaction_id}"
-        }
-    )
+    key = {"pk": pk}
+    if sk is not None:
+        key["sk"] = sk
+
+    return table.delete_item(Key=key)
 
 
-def format_policy_for_api(policy: Dict) -> Dict:
+def batch_write_items(
+    table_name: str,
+    items: List[Dict],
+    region: str = "us-east-1"
+) -> None:
     """
-    Format a DynamoDB policy record for API response.
-    Matches the Policy Inquiry API spec format.
+    Batch write items to a table (max 25 per batch).
 
     Args:
-        policy: Raw DynamoDB policy record
-
-    Returns:
-        Formatted policy for API response
+        table_name: Name of the DynamoDB table
+        items: List of items to write
+        region: AWS region
     """
-    return {
-        "policyNumber": policy.get("policyNumber"),
-        "carrierName": policy.get("carrierName"),
-        "accountType": policy.get("accountType"),
-        "planType": policy.get("planType"),
-        "ownership": policy.get("ownership"),
-        "productName": policy.get("productName"),
-        "cusip": policy.get("cusip"),
-        "trailingCommission": policy.get("trailingCommission", False),
-        "contractStatus": policy.get("contractStatus"),
-        "withdrawalStructure": policy.get("withdrawalStructure", {"systematicInPlace": False}),
-        "errors": policy.get("errors", [])
-    }
+    table = get_table(table_name, region)
+
+    with table.batch_writer() as batch:
+        for item in items:
+            batch.put_item(Item=item)
 
 
-def format_policy_detail_for_api(policy: Dict) -> Dict:
+def batch_delete_items(
+    table_name: str,
+    keys: List[Dict],
+    region: str = "us-east-1"
+) -> None:
     """
-    Format a DynamoDB policy record for detailed API response.
-    Includes all fields for carrier admin view.
+    Batch delete items from a table.
 
     Args:
-        policy: Raw DynamoDB policy record
-
-    Returns:
-        Formatted policy with all details
+        table_name: Name of the DynamoDB table
+        keys: List of key dicts (each with pk and optionally sk)
+        region: AWS region
     """
-    return {
-        "transactionId": policy.get("transactionId"),
-        "policyNumber": policy.get("policyNumber"),
-        "carrierId": policy.get("carrierId"),
-        "carrierName": policy.get("carrierName"),
-        "currentStatus": policy.get("currentStatus"),
-        "createdAt": policy.get("createdAt"),
-        "updatedAt": policy.get("updatedAt"),
-        "client": {
-            "clientName": policy.get("clientName"),
-            "ssnLast4": policy.get("ssnLast4")
-        },
-        "servicingAgent": policy.get("servicingAgent"),
-        "policyDetails": {
-            "accountType": policy.get("accountType"),
-            "planType": policy.get("planType"),
-            "ownership": policy.get("ownership"),
-            "productName": policy.get("productName"),
-            "cusip": policy.get("cusip"),
-            "trailingCommission": policy.get("trailingCommission", False),
-            "contractStatus": policy.get("contractStatus"),
-            "withdrawalStructure": policy.get("withdrawalStructure", {"systematicInPlace": False})
-        },
-        "errors": policy.get("errors", [])
-    }
+    table = get_table(table_name, region)
+
+    with table.batch_writer() as batch:
+        for key in keys:
+            batch.delete_item(Key=key)
 
 
 def to_json(data: Any) -> str:
     """Convert data to JSON string, handling Decimal types."""
     return json.dumps(data, cls=DecimalEncoder)
+
+
+# Re-export condition builders for convenience
+__all__ = [
+    "get_dynamodb_resource",
+    "get_dynamodb_client",
+    "get_table",
+    "get_item",
+    "query_items",
+    "scan_items",
+    "put_item",
+    "update_item",
+    "delete_item",
+    "batch_write_items",
+    "batch_delete_items",
+    "to_json",
+    "DecimalEncoder",
+    "Key",
+    "Attr",
+]

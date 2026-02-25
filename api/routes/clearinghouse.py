@@ -71,8 +71,7 @@ def submit_policy_inquiry_request():
         return create_response(
             "RECEIVED",
             "Policy inquiry request received and routed to delivering broker",
-            transaction_id,
-            200
+            transaction_id
         )
 
     except Exception as e:
@@ -131,8 +130,7 @@ def submit_policy_inquiry_response():
         return create_response(
             "RECEIVED",
             "Policy inquiry response received and forwarded to requesting broker",
-            transaction_id,
-            200
+            transaction_id
         )
 
     except Exception as e:
@@ -187,8 +185,7 @@ def receive_bd_change_request():
         return create_response(
             "RECEIVED",
             "BD change request received and routed to carrier for validation",
-            transaction_id,
-            200
+            transaction_id
         )
 
     except Exception as e:
@@ -255,8 +252,7 @@ def receive_carrier_response():
         return create_response(
             "RECEIVED",
             f"Carrier validation response received - {status_message}",
-            transaction_id,
-            200
+            transaction_id
         )
 
     except Exception as e:
@@ -318,8 +314,7 @@ def receive_transfer_confirmation():
         return create_response(
             "RECEIVED",
             f"Transfer confirmation received - {confirmation_status}",
-            transaction_id,
-            200
+            transaction_id
         )
 
     except Exception as e:
