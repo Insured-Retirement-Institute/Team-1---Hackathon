@@ -241,10 +241,10 @@ def format_iiex_policy_for_response(policy: dict, client_ssn: str = None) -> dic
         "ownership": policy.get("ownership", "single"),
         "productName": policy.get("productName"),
         "cusip": policy.get("cusip"),
-        "trailingCommission": policy.get("trailingCommission", False),
+        "hasTrailingCommission": policy.get("trailingCommission", False),
         "contractStatus": POLICY_STATUS_MAP.get(policy_status, "active"),
         "withdrawalStructure": {
-            "systematicInPlace": False
+            "hasSystematicWithdrawal": False
         },
         "errors": errors
     }
@@ -327,15 +327,15 @@ def dtcc_policy_inquiry():
 
         response_payload = {
             "requestingFirm": {
-                "firmName": requesting_firm.get('firmName'),
+                "name": requesting_firm.get('firmName'),
                 "firmId": requesting_firm.get('firmId'),
                 "servicingAgent": {
-                    "agentName": servicing_agent.get('agentName'),
+                    "producerName": servicing_agent.get('agentName'),
                     "npn": servicing_agent.get('npn')
                 }
             },
             "producerValidation": {
-                "agentName": servicing_agent.get('agentName'),
+                "producerName": servicing_agent.get('agentName'),
                 "npn": servicing_agent.get('npn'),
                 "errors": []
             },
@@ -371,7 +371,7 @@ def dtcc_policy_inquiry():
         )
 
 
-@BP.route('/policy-inquiry', methods=['POST'], strict_slashes=False)
+@BP.route('/policy-inquiries/create', methods=['POST'], strict_slashes=False)
 def policy_inquiry():
     """
     Process policy inquiry request.
@@ -454,7 +454,7 @@ def policy_inquiry():
         )
 
 
-@BP.route('/policy-inquiry-callback', methods=['POST'], strict_slashes=False)
+@BP.route('/policy-inquiries/reply', methods=['POST'], strict_slashes=False)
 def policy_inquiry_callback():
     """
     Policy inquiry callback - receive policy inquiry response.
@@ -546,7 +546,7 @@ def policy_inquiry_callback():
         )
 
 
-@BP.route('/bd-change', methods=['POST'], strict_slashes=False)
+@BP.route('/servicing-agent-changes/create', methods=['POST'], strict_slashes=False)
 def bd_change():
     """
     Brokerage dealer change request.
@@ -636,7 +636,7 @@ def bd_change():
         )
 
 
-@BP.route('/bd-change-callback', methods=['POST'], strict_slashes=False)
+@BP.route('/servicing-agent-changes/reply', methods=['POST'], strict_slashes=False)
 def bd_change_callback():
     """
     BD change callback - receive carrier validation response.
@@ -730,7 +730,7 @@ def bd_change_callback():
         )
 
 
-@BP.route('/transfer-notification', methods=['POST'], strict_slashes=False)
+@BP.route('/transfer-notifications/create', methods=['POST'], strict_slashes=False)
 def transfer_notification():
     """
     Transfer notification - accept transfer-related notifications.
@@ -813,7 +813,7 @@ def transfer_notification():
         )
 
 
-@BP.route('/transfer-confirmation', methods=['POST'], strict_slashes=False)
+@BP.route('/transfer-notifications/reply', methods=['POST'], strict_slashes=False)
 def transfer_confirmation():
     """
     Transfer confirmation - accept transfer confirmation from delivering entity.
@@ -900,8 +900,8 @@ def transfer_confirmation():
         )
 
 
-@BP.route('/query-status/<transaction_id>', methods=['GET'], strict_slashes=False)
-def query_status(transaction_id):
+@BP.route('/status/<requestId>', methods=['GET'], strict_slashes=False)
+def query_status(requestId):
     """
     Query transaction status
     Retrieve current status and history for a specific transaction from request-tracking table.
@@ -909,52 +909,52 @@ def query_status(transaction_id):
     try:
         # Validate UUID format
         try:
-            uuid.UUID(transaction_id)
+            uuid.UUID(requestId)
         except ValueError:
             return create_error_response(
-                "INVALID_TRANSACTION_ID",
-                "Transaction ID must be a valid UUID",
+                "INVALID_REQUEST_ID",
+                "Request ID must be a valid UUID",
                 400
             )
 
-        logger.info(f"Querying status for transaction: {transaction_id}")
+        logger.info(f"Querying status for request: {requestId}")
 
         # Get tracking record
-        record = get_tracking_record(transaction_id)
+        record = get_tracking_record(requestId)
 
         if not record:
             return create_error_response(
                 "NOT_FOUND",
-                f"Transaction {transaction_id} not found",
+                f"Request {requestId} not found",
                 404
             )
 
         # Format response
         status_data = {
-            "transaction-id": record.get("transactionId"),
-            "current-status": record.get("currentStatus"),
-            "created-at": record.get("createdAt"),
-            "updated-at": record.get("updatedAt"),
-            "status-history": record.get("statusHistory", []),
-            "policies-affected": record.get("policiesAffected", []),
-            "additional-data": {
-                "receiving-broker-id": record.get("receivingBrokerId"),
-                "delivering-broker-id": record.get("deliveringBrokerId"),
-                "carrier-id": record.get("carrierId"),
-                "carrier-name": record.get("carrierName"),
-                "client-name": record.get("clientName"),
-                "ssn-last-4": record.get("ssnLast4"),
+            "requestId": record.get("transactionId"),
+            "currentStatus": record.get("currentStatus"),
+            "createdAt": record.get("createdAt"),
+            "updatedAt": record.get("updatedAt"),
+            "statusHistory": record.get("statusHistory", []),
+            "policiesAffected": record.get("policiesAffected", []),
+            "additionalData": {
+                "receivingBrokerId": record.get("receivingBrokerId"),
+                "deliveringBrokerId": record.get("deliveringBrokerId"),
+                "carrierId": record.get("carrierId"),
+                "carrierName": record.get("carrierName"),
+                "clientName": record.get("clientName"),
+                "ssnLast4": record.get("ssnLast4"),
             }
         }
 
         # Include rejection reason if present
         if "rejectionReason" in record:
-            status_data["rejection-reason"] = record["rejectionReason"]
+            status_data["rejectionReason"] = record["rejectionReason"]
 
         return jsonify(status_data), 200
 
     except Exception as e:
-        logger.error(f"Error querying transaction status: {str(e)}")
+        logger.error(f"Error querying request status: {str(e)}")
         return create_error_response(
             "INTERNAL_ERROR",
             "Internal server error occurred",

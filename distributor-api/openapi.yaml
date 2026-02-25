@@ -1,0 +1,610 @@
+openapi: 3.1.0
+info:
+  title: Distributor API
+  description: Agent/Client/Contract/Transaction management API for broker-dealer changes
+  version: 1.0.0
+  contact:
+    name: API Support
+
+servers:
+  - url: https://8mmrxe8ug1.execute-api.us-east-1.amazonaws.com/Prod
+    description: Production server
+
+paths:
+  /:
+    get:
+      summary: Health check
+      operationId: healthCheck
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /agent/{npn}:
+    get:
+      summary: Get agent profile
+      operationId: getAgent
+      tags:
+        - Agents
+      parameters:
+        - $ref: '#/components/parameters/npn'
+      responses:
+        '200':
+          description: Agent profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '404':
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /agent/{npn}/clients:
+    get:
+      summary: Get all clients for an agent
+      operationId: getAgentClients
+      tags:
+        - Agents
+        - Clients
+      parameters:
+        - $ref: '#/components/parameters/npn'
+      responses:
+        '200':
+          description: List of clients for the agent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetAgentClientsResponse'
+        '404':
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    post:
+      summary: Create a new client for an agent
+      operationId: createClient
+      tags:
+        - Agents
+        - Clients
+      parameters:
+        - $ref: '#/components/parameters/npn'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateClientRequest'
+      responses:
+        '201':
+          description: Client created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateClientResponse'
+        '400':
+          description: Invalid request (missing required fields)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /agent/{npn}/transactions:
+    get:
+      summary: Get all transactions for an agent
+      operationId: getAgentTransactions
+      tags:
+        - Agents
+        - Transactions
+      parameters:
+        - $ref: '#/components/parameters/npn'
+      responses:
+        '200':
+          description: List of transactions for the agent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetAgentTransactionsResponse'
+        '404':
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    post:
+      summary: Create a new transaction for an agent
+      operationId: createTransaction
+      tags:
+        - Agents
+        - Transactions
+      parameters:
+        - $ref: '#/components/parameters/npn'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTransactionRequest'
+      responses:
+        '201':
+          description: Transaction created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateTransactionResponse'
+        '400':
+          description: Invalid request (missing fields or client not assigned to agent)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /client/{clientId}:
+    get:
+      summary: Get client profile
+      operationId: getClient
+      tags:
+        - Clients
+      parameters:
+        - $ref: '#/components/parameters/clientId'
+      responses:
+        '200':
+          description: Client profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Client'
+        '404':
+          description: Client not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /client/{clientId}/contracts:
+    get:
+      summary: Get all contracts for a client
+      operationId: getClientContracts
+      tags:
+        - Clients
+        - Contracts
+      parameters:
+        - $ref: '#/components/parameters/clientId'
+      responses:
+        '200':
+          description: List of contracts for the client
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetClientContractsResponse'
+        '404':
+          description: Client not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  parameters:
+    npn:
+      name: npn
+      in: path
+      required: true
+      description: National Producer Number (agent identifier)
+      schema:
+        type: string
+        example: "12345678"
+
+    clientId:
+      name: clientId
+      in: path
+      required: true
+      description: Unique client identifier
+      schema:
+        type: string
+        example: "C001"
+
+  schemas:
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - service
+      properties:
+        status:
+          type: string
+          enum: [healthy]
+        service:
+          type: string
+          enum: [distributor-api]
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Error message
+
+    Agent:
+      type: object
+      required:
+        - pk
+        - sk
+        - type
+        - npn
+        - agentName
+        - firmId
+        - firmName
+        - status
+        - createdAt
+      properties:
+        pk:
+          type: string
+          description: Partition key (AGENT#{npn})
+          example: "AGENT#12345678"
+        sk:
+          type: string
+          description: Sort key
+          enum: [PROFILE]
+        type:
+          type: string
+          enum: [Agent]
+        npn:
+          type: string
+          description: National Producer Number
+          example: "12345678"
+        agentName:
+          type: string
+          example: "Sarah Johnson"
+        firmId:
+          type: string
+          example: "BD001"
+        firmName:
+          type: string
+          example: "Premier Financial Services"
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE, SUSPENDED]
+        createdAt:
+          type: string
+          format: date-time
+          example: "2024-01-15T00:00:00Z"
+
+    Client:
+      type: object
+      required:
+        - pk
+        - sk
+        - type
+        - clientId
+        - clientName
+        - ssnLast4
+        - createdAt
+      properties:
+        pk:
+          type: string
+          description: Partition key (CLIENT#{clientId})
+          example: "CLIENT#C001"
+        sk:
+          type: string
+          enum: [PROFILE]
+        type:
+          type: string
+          enum: [Client]
+        clientId:
+          type: string
+          example: "C001"
+        clientName:
+          type: string
+          example: "John Smith"
+        ssnLast4:
+          type: string
+          pattern: "^[0-9]{4}$"
+          example: "1234"
+        createdAt:
+          type: string
+          format: date-time
+
+    AgentClient:
+      type: object
+      required:
+        - pk
+        - sk
+        - type
+        - clientId
+        - clientName
+        - ssnLast4
+        - assignedAt
+      properties:
+        pk:
+          type: string
+          description: Partition key (AGENT#{npn})
+          example: "AGENT#12345678"
+        sk:
+          type: string
+          description: Sort key (CLIENT#{clientId})
+          example: "CLIENT#C001"
+        type:
+          type: string
+          enum: [AgentClient]
+        clientId:
+          type: string
+        clientName:
+          type: string
+        ssnLast4:
+          type: string
+          pattern: "^[0-9]{4}$"
+        assignedAt:
+          type: string
+          format: date-time
+
+    Contract:
+      type: object
+      required:
+        - pk
+        - sk
+        - type
+        - clientId
+        - policyNumber
+        - carrierName
+        - carrierId
+        - productName
+        - productType
+        - planType
+        - cusip
+        - issueState
+        - status
+        - systematicWithdrawal
+        - commissionTrails
+      properties:
+        pk:
+          type: string
+          description: Partition key (CLIENT#{clientId})
+        sk:
+          type: string
+          description: Sort key (CONTRACT#{policyNumber})
+        type:
+          type: string
+          enum: [Contract]
+        clientId:
+          type: string
+        policyNumber:
+          type: string
+          example: "POL-001-2024"
+        carrierName:
+          type: string
+          example: "Athene"
+        carrierId:
+          type: string
+          example: "ATH1"
+        productName:
+          type: string
+          example: "Athene Agility 10"
+        productType:
+          type: string
+          example: "Fixed Indexed Annuity"
+        planType:
+          type: string
+          example: "IRA"
+        cusip:
+          type: string
+          example: "04686J201"
+        issueState:
+          type: string
+          example: "NY"
+        status:
+          type: string
+          enum: [Active, Surrendered, Death Claim Pending]
+        systematicWithdrawal:
+          type: boolean
+        commissionTrails:
+          type: boolean
+
+    Transaction:
+      type: object
+      required:
+        - pk
+        - sk
+        - type
+        - transactionId
+        - clientId
+        - clientName
+        - contracts
+        - transactionType
+        - status
+        - receivingBrokerId
+        - deliveringBrokerId
+        - createdAt
+        - updatedAt
+      properties:
+        pk:
+          type: string
+          description: Partition key (AGENT#{npn})
+        sk:
+          type: string
+          description: Sort key (TRANSACTION#{transactionId})
+        type:
+          type: string
+          enum: [Transaction]
+        transactionId:
+          type: string
+          format: uuid
+        clientId:
+          type: string
+        clientName:
+          type: string
+        contracts:
+          type: array
+          items:
+            type: string
+          description: Array of policy numbers
+        transactionType:
+          type: string
+          enum: [BD_CHANGE]
+        status:
+          type: string
+          enum:
+            - MANIFEST_REQUESTED
+            - MANIFEST_RECEIVED
+            - DUE_DILIGENCE_COMPLETE
+            - CARRIER_VALIDATION_PENDING
+            - CARRIER_APPROVED
+            - CARRIER_REJECTED
+            - TRANSFER_INITIATED
+            - TRANSFER_PROCESSING
+            - TRANSFER_CONFIRMED
+            - COMPLETE
+        receivingBrokerId:
+          type: string
+        deliveringBrokerId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    GetAgentClientsResponse:
+      type: object
+      required:
+        - clients
+        - count
+      properties:
+        clients:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentClient'
+        count:
+          type: integer
+          minimum: 0
+
+    GetAgentTransactionsResponse:
+      type: object
+      required:
+        - transactions
+        - count
+      properties:
+        transactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Transaction'
+        count:
+          type: integer
+          minimum: 0
+
+    GetClientContractsResponse:
+      type: object
+      required:
+        - contracts
+        - count
+      properties:
+        contracts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Contract'
+        count:
+          type: integer
+          minimum: 0
+
+    CreateClientRequest:
+      type: object
+      required:
+        - clientName
+        - ssnLast4
+      properties:
+        clientName:
+          type: string
+          description: Full name of the client
+          example: "Jane Doe"
+        ssnLast4:
+          type: string
+          pattern: "^[0-9]{4}$"
+          description: Last 4 digits of SSN
+          example: "5678"
+
+    CreateClientResponse:
+      type: object
+      required:
+        - message
+        - client
+      properties:
+        message:
+          type: string
+          example: "Client created"
+        client:
+          $ref: '#/components/schemas/Client'
+
+    CreateTransactionRequest:
+      type: object
+      required:
+        - clientId
+        - contracts
+        - receivingBrokerId
+      properties:
+        clientId:
+          type: string
+          description: ID of the client for this transaction
+          example: "C001"
+        contracts:
+          type: array
+          items:
+            type: string
+          description: Array of policy numbers to include in the transaction
+          example: ["POL-001-2024", "POL-002-2024"]
+        receivingBrokerId:
+          type: string
+          description: Broker-dealer ID receiving the transfer
+          example: "BD002"
+        transactionType:
+          type: string
+          enum: [BD_CHANGE]
+          default: BD_CHANGE
+
+    CreateTransactionResponse:
+      type: object
+      required:
+        - message
+        - transaction
+      properties:
+        message:
+          type: string
+          example: "Transaction created"
+        transaction:
+          $ref: '#/components/schemas/Transaction'
+
+tags:
+  - name: Health
+    description: Health check endpoints
+  - name: Agents
+    description: Agent management operations
+  - name: Clients
+    description: Client management operations
+  - name: Contracts
+    description: Contract/policy operations
+  - name: Transactions
+    description: BD change transaction operations
