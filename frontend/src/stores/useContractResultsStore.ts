@@ -292,7 +292,7 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 				}
 			}
 
-			const response = await brokerDealerApi.submitPolicyInquiryRequest(request)
+			const response = await brokerDealerApi.triggerPolicyInquiry(request)
 
 
 			if (isClientResponse(response.payload?.client) && response.payload?.client.policies && response.payload.client.policies.length > 0) {

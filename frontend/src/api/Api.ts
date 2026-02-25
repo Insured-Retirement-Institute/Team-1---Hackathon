@@ -72,10 +72,10 @@ export const checkDistributorHealth = () => fetch(`${DISTRIBUTOR_API}/`)
 
 // Clearinghouse API endpoints
 export const clearinghouseApi = {
-	submitPolicyInquiryRequest: (
+	triggerPolicyInquiryRequest: (
 		request: PolicyInquiryRequest
 	): Promise<StandardResponse> =>
-		fetchJson(`${CLEARINGHOUSE_API}/submit-policy-inquiry-request`, {
+		fetchJson(`${CLEARINGHOUSE_API}/trigger-policy-inquiry`, {
 			method: 'POST',
 			body: JSON.stringify(request)
 		}),
@@ -134,10 +134,10 @@ export const brokerDealerApi = {
 			body: JSON.stringify(request)
 		}),
 
-	submitPolicyInquiryRequest: (
+	triggerPolicyInquiry: (
 		request: PolicyInquiryRequest
 	): Promise<StandardResponse> =>
-		fetchJson(`${BROKER_DEALER_API}/submit-policy-inquiry-request`, {
+		fetchJson(`${BROKER_DEALER_API}/trigger-policy-inquiry`, {
 			method: 'POST',
 			body: JSON.stringify(request)
 		}),

@@ -15,6 +15,7 @@ import { monotonicFactory } from 'ulid';
 import { fileToBase64 } from '@/utils/fileUtils';
 import { useClientStore } from '@/stores/useClientStore';
 import { ref } from 'vue';
+import type { PolicyInquiryResponse } from '@/models/ClearinghouseApi';
 
 const ulid = monotonicFactory()
 
@@ -61,6 +62,13 @@ onChange(async files => {
 		})
 
 		console.log('PDF extraction response:', response)
+
+		const contractNumbers = ((response.payload as any).policyInquiryResponse as PolicyInquiryResponse).client.policies.map(p => p.policyNumber)
+
+		searchContracts.value = []
+
+		contractNumbers.forEach(c => contractResultsStore.addSearchContract({ contractNumber: c ?? '' }))
+
 	} catch (error) {
 		console.error('PDF extraction failed:', error)
 	} finally {

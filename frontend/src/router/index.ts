@@ -70,6 +70,13 @@ const router = createRouter({
 			meta: {
 				title: 'API Health'
 			}
+		},
+		{
+			path: '/event-source-health',
+			component: () => import('@/pages/EventSourceHealth.vue'),
+			meta: {
+				title: 'EventSource Monitor'
+			}
 		}
 	],
 })

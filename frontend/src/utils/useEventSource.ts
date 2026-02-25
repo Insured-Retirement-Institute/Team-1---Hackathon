@@ -11,9 +11,15 @@ const source = () => {
 		console.log(`connecting to ${url}`)
 
 		setInterval(async () => {
-			const results = await fetch(url).then(res => res.json())
-
-		}, 15_000)
+			try {
+				const results = await fetch(url).then(res => res.json())
+				if (results) {
+					serverEventBus.emit(results)
+				}
+			} catch (error) {
+				console.error('Failed to fetch events:', error)
+			}
+		}, 1_000)
 
 		polling = true
 	}
