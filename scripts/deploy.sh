@@ -36,7 +36,7 @@ deploy_function() {
   local ZIP_FILE="/tmp/${FUNCTION_NAME}-$(date +%Y%m%d-%H%M%S).zip"
 
   # Install dependencies and copy source into temp dir
-  pip install -r "$DIR/requirements.txt" -t "$TMP_DIR" --quiet
+  pip3 install -r "$DIR/requirements.txt" -t "$TMP_DIR" --quiet
   cp -r "$DIR"/. "$TMP_DIR/"
 
   # Create zip (exclude pyc / __pycache__)
