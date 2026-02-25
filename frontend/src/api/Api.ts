@@ -19,10 +19,12 @@ export const awsTest = () => fetch('https://q4wbter4btlhos5jz2nm2u53ye0khura.lam
 const CLEARINGHOUSE_API = import.meta.env.VITE_CLEARINGHOUSE_API as string
 const BROKER_DEALER_API = import.meta.env.VITE_BROKER_DEALER_API as string
 const INSURANCE_CARRIER_API = import.meta.env.VITE_INSURANCE_CARRIER_API as string
+const EVENTSOURCE_API = import.meta.env.VITE_EVENTSOURCE as string
 
 export const checkBrokerDealerHealth = () => fetch(`${BROKER_DEALER_API}/health`)
 export const checkClearingHouseHealth = () => fetch(`${CLEARINGHOUSE_API}/health`)
 export const checkCarrierHealth = () => fetch(`${INSURANCE_CARRIER_API}/health`)
+export const checkEventSourceHealth = () => fetch(`${EVENTSOURCE_API}`)
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
 	const response = await fetch(url, {
