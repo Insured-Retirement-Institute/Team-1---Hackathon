@@ -85,10 +85,40 @@ def validate_transaction_id(headers):
 
 
 def normalize_lambda_event(event):
-    """Ensure required WSGI fields are present for serverless_wsgi."""
+    """Ensure required WSGI fields are present for serverless_wsgi.
+
+    Translates Lambda Function URL / API Gateway v2 payload format to the
+    API Gateway v1 format expected by awsgi.
+    """
     if not event:
         return event
 
+    # --- Translate v2 → v1 when httpMethod is absent ---
+    if "httpMethod" not in event:
+        http_ctx = (event.get("requestContext") or {}).get("http", {})
+
+        # Method
+        event.setdefault("httpMethod", http_ctx.get("method", "GET"))
+
+        # Path
+        event.setdefault("path", event.get("rawPath", "/"))
+
+        # Query string: v2 collapses everything into rawQueryString
+        if "queryStringParameters" not in event:
+            raw_qs = event.get("rawQueryString", "")
+            if raw_qs:
+                from urllib.parse import parse_qs
+                event["queryStringParameters"] = {
+                    k: v[-1] for k, v in parse_qs(raw_qs).items()
+                }
+            else:
+                event["queryStringParameters"] = {}
+
+        # requestContext shim so awsgi can read identity/sourceIp
+        rc = event.setdefault("requestContext", {})
+        rc.setdefault("identity", {"sourceIp": http_ctx.get("sourceIp", "")})
+
+    # --- Ensure headers dict and X-Forwarded-Proto ---
     headers = event.get("headers")
     if not isinstance(headers, dict):
         headers = {}
