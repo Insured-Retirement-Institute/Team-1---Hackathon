@@ -3,6 +3,8 @@ import { FwbButton } from 'flowbite-vue';
 import { useRoute, useRouter } from 'vue-router';
 import AppLoader from '@/components/AppLoader.vue';
 import type { RouteMeta } from '@/router';
+import { awsTest } from './api/Api';
+import NavBar from './components/NavBar.vue';
 
 const route = useRoute()
 const router = useRouter()
@@ -13,11 +15,14 @@ async function handleNavigation(meta: RouteMeta) {
 	}
 	router.push(meta.route)
 }
+
+awsTest()
 </script>
 
 <template>
-	<AppLoader />
 	<div class="flex flex-col h-screen">
+		<AppLoader />
+		<NavBar />
 		<div class="flex flex-wrap w-full *:p-2 grow overflow-auto p-10">
 			<RouterView v-slot="{ Component }">
 				<Transition name="fade">

@@ -4,6 +4,7 @@ import type {
 	BdChangeRequest,
 	CarrierResponse,
 	TransferConfirmation,
+	TransferNotification,
 	TransactionStatus,
 	StandardResponse
 } from '@/models/ClearinghouseApi'
@@ -94,7 +95,50 @@ export const brokerDealerApi = {
 			method: 'POST',
 			headers: { transactionId },
 			body: JSON.stringify(request)
-		})
+		}),
+
+	submitPolicyInquiryRequest: (
+		transactionId: string,
+		request: PolicyInquiryRequest
+	): Promise<StandardResponse> =>
+		fetchJson(`${BROKER_DEALER_API}/submit-policy-inquiry-request`, {
+			method: 'POST',
+			headers: { transactionId },
+			body: JSON.stringify(request)
+		}),
+
+	receivePolicyInquiryResponse: (
+		transactionId: string,
+		response: PolicyInquiryResponse
+	): Promise<StandardResponse> =>
+		fetchJson(`${BROKER_DEALER_API}/receive-policy-inquiry-response`, {
+			method: 'POST',
+			headers: { transactionId },
+			body: JSON.stringify(response)
+		}),
+
+	receiveBdChangeRequest: (
+		transactionId: string,
+		request: BdChangeRequest
+	): Promise<StandardResponse> =>
+		fetchJson(`${BROKER_DEALER_API}/receive-bd-change-request`, {
+			method: 'POST',
+			headers: { transactionId },
+			body: JSON.stringify(request)
+		}),
+
+	receiveTransferNotification: (
+		transactionId: string,
+		notification: TransferNotification
+	): Promise<StandardResponse> =>
+		fetchJson(`${BROKER_DEALER_API}/receive-transfer-notification`, {
+			method: 'POST',
+			headers: { transactionId },
+			body: JSON.stringify(notification)
+		}),
+
+	queryTransactionStatus: (transactionId: string): Promise<TransactionStatus> =>
+		fetchJson(`${BROKER_DEALER_API}/query-status/${transactionId}`)
 }
 
 // Insurance Carrier API endpoints (for direct carrier queries)
@@ -104,6 +148,17 @@ export const insuranceCarrierApi = {
 		request: { policies: string[] }
 	): Promise<PolicyInquiryResponse> =>
 		fetchJson(`${INSURANCE_CARRIER_API}/validate-policies`, {
+			method: 'POST',
+			headers: { transactionId },
+			body: JSON.stringify(request)
+		}),
+
+	// Direct carrier access (bypassing clearinghouse)
+	submitPolicyInquiryRequest: (
+		transactionId: string,
+		request: PolicyInquiryRequest
+	): Promise<StandardResponse> =>
+		fetchJson(`${INSURANCE_CARRIER_API}/submit-policy-inquiry-request`, {
 			method: 'POST',
 			headers: { transactionId },
 			body: JSON.stringify(request)

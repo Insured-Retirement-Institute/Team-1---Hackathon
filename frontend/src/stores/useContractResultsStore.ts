@@ -3,7 +3,7 @@ import { defineStore } from 'pinia'
 import { AccountType, ContractStatus, OwnershipType, PlanType, type ContractRecord } from '@/models/ContractRecord'
 import { useLoaderStore } from '@/stores/useLoaderStore'
 import { brokerDealerApi, insuranceCarrierApi } from '@/api/ClearinghouseApi'
-import type { DetailedPolicyInfo, PolicyInquiryRequest } from '@/models/ClearinghouseApi'
+import { isClientResponse, type DetailedPolicyInfo, type PolicyInquiryRequest } from '@/models/ClearinghouseApi'
 
 const CARRIER_PRODUCTS: Record<string, string> = {
 	'Allianz Life': 'Allianz 222® Annuity',
@@ -263,11 +263,12 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 				}
 			}
 
-			const response = await brokerDealerApi.queryPolicies(transactionId, request)
+			const response = await brokerDealerApi.submitPolicyInquiryRequest(transactionId, request)
 
-			if (response.client.policies && response.client.policies.length > 0) {
+
+			if (isClientResponse(response.payload?.client) && response.payload?.client.policies && response.payload.client.policies.length > 0) {
 				// Map API response to ContractRecords
-				dtccContractResults.value = response.client.policies.map((policy) => {
+				dtccContractResults.value = response.payload?.client.policies.map((policy) => {
 					const hasErrors = policy.errors && policy.errors.length > 0
 					const resolved = !hasErrors && !!policy.carrierName
 					return mapDetailedPolicyToContractRecord(policy, resolved)
