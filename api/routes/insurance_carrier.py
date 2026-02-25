@@ -316,7 +316,7 @@ def validate_producer(agent_name: str, npn: str) -> list:
 
 # ── Route handlers ──────────────────────────────────────────────────────────────
 
-@BP.route('/health', methods=['GET'])
+@BP.route('/health', methods=['GET'], strict_slashes=False)
 def health_check():
     """Health check endpoint"""
     return jsonify({
@@ -449,7 +449,7 @@ def _process_carrier_policy_inquiry(carrier_key: str):
         )
 
 
-@BP.route('/athene/policy-inquiry', methods=['POST'])
+@BP.route('/athene/policy-inquiry', methods=['POST'], strict_slashes=False)
 def athene_policy_inquiry():
     """
     Athene-specific policy inquiry endpoint.
@@ -458,7 +458,7 @@ def athene_policy_inquiry():
     return _process_carrier_policy_inquiry("athene")
 
 
-@BP.route('/paclife/policy-inquiry', methods=['POST'])
+@BP.route('/paclife/policy-inquiry', methods=['POST'], strict_slashes=False)
 def paclife_policy_inquiry():
     """
     Pacific Life-specific policy inquiry endpoint.
@@ -467,7 +467,7 @@ def paclife_policy_inquiry():
     return _process_carrier_policy_inquiry("paclife")
 
 
-@BP.route('/prudential/policy-inquiry', methods=['POST'])
+@BP.route('/prudential/policy-inquiry', methods=['POST'], strict_slashes=False)
 def prudential_policy_inquiry():
     """
     Prudential-specific policy inquiry endpoint.
@@ -476,7 +476,7 @@ def prudential_policy_inquiry():
     return _process_carrier_policy_inquiry("prudential")
 
 
-@BP.route('/policy-inquiry', methods=['POST'])
+@BP.route('/policy-inquiry', methods=['POST'], strict_slashes=False)
 def policy_inquiry():
     """
     Process policy inquiry request (direct or via clearinghouse).
@@ -579,7 +579,7 @@ def policy_inquiry():
         return create_error_response("INTERNAL_ERROR", "Internal server error occurred", 500)
 
 
-@BP.route('/policy-inquiry-callback', methods=['POST'])
+@BP.route('/policy-inquiry-callback', methods=['POST'], strict_slashes=False)
 def policy_inquiry_callback():
     """
     Policy inquiry callback - submit policy inquiry response.
@@ -616,7 +616,7 @@ def policy_inquiry_callback():
         return create_error_response("INTERNAL_ERROR", "Internal server error occurred", 500)
 
 
-@BP.route('/bd-change', methods=['POST'])
+@BP.route('/bd-change', methods=['POST'], strict_slashes=False)
 def bd_change():
     """
     Brokerage dealer change request.
@@ -745,7 +745,7 @@ def bd_change():
         return create_error_response("INTERNAL_ERROR", "Internal server error occurred", 500)
 
 
-@BP.route('/transfer-notification', methods=['POST'])
+@BP.route('/transfer-notification', methods=['POST'], strict_slashes=False)
 def transfer_notification():
     """
     Transfer notification - accept transfer-related notifications.
@@ -808,7 +808,7 @@ def transfer_notification():
         return create_error_response("INTERNAL_ERROR", "Internal server error occurred", 500)
 
 
-@BP.route('/bd-change-callback', methods=['POST'])
+@BP.route('/bd-change-callback', methods=['POST'], strict_slashes=False)
 def bd_change_callback():
     """
     BD change callback - submit carrier validation response.
@@ -873,7 +873,7 @@ def bd_change_callback():
         )
 
 
-@BP.route('/transfer-confirmation', methods=['POST'])
+@BP.route('/transfer-confirmation', methods=['POST'], strict_slashes=False)
 def transfer_confirmation():
     """
     Transfer confirmation - accept transfer confirmation.
@@ -936,7 +936,7 @@ def transfer_confirmation():
         )
 
 
-@BP.route('/query-status/<transaction_id>', methods=['GET'])
+@BP.route('/query-status/<transaction_id>', methods=['GET'], strict_slashes=False)
 def query_status(transaction_id):
     """
     Query transaction status by transaction ID.

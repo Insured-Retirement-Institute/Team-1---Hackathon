@@ -56,7 +56,7 @@ def _sse_format(data: dict, event_type: str = "event") -> str:
 
 # ---- POST /api/events -------------------------------------------------------
 
-@BP.route("/", methods=["POST"])
+@BP.route("/", methods=["POST"], strict_slashes=False)
 def receive_event():
     """
     Receive an EventBridge (or any JSON) event payload.
@@ -84,7 +84,7 @@ def receive_event():
 
 
 # ---- GET /api/events --------------------------------------------------------
-@BP.route("/", methods=["GET"])
+@BP.route("/", methods=["GET"], strict_slashes=False)
 def stream_events():
     """
     Server-Sent Events (SSE) stream.

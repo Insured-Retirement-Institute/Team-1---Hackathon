@@ -250,7 +250,7 @@ def format_iiex_policy_for_response(policy: dict, client_ssn: str = None) -> dic
     }
 
 
-@BP.route('/health', methods=['GET'])
+@BP.route('/health', methods=['GET'], strict_slashes=False)
 def health_check():
     """Health check endpoint"""
     return jsonify({
@@ -260,7 +260,7 @@ def health_check():
     }), 200
 
 
-@BP.route('/dtcc/policy-inquiry', methods=['POST'])
+@BP.route('/dtcc/policy-inquiry', methods=['POST'], strict_slashes=False)
 def dtcc_policy_inquiry():
     """
     DTCC/IIEX policy inquiry endpoint.
@@ -371,7 +371,7 @@ def dtcc_policy_inquiry():
         )
 
 
-@BP.route('/policy-inquiry', methods=['POST'])
+@BP.route('/policy-inquiry', methods=['POST'], strict_slashes=False)
 def policy_inquiry():
     """
     Process policy inquiry request.
@@ -454,7 +454,7 @@ def policy_inquiry():
         )
 
 
-@BP.route('/policy-inquiry-callback', methods=['POST'])
+@BP.route('/policy-inquiry-callback', methods=['POST'], strict_slashes=False)
 def policy_inquiry_callback():
     """
     Policy inquiry callback - receive policy inquiry response.
@@ -546,7 +546,7 @@ def policy_inquiry_callback():
         )
 
 
-@BP.route('/bd-change', methods=['POST'])
+@BP.route('/bd-change', methods=['POST'], strict_slashes=False)
 def bd_change():
     """
     Brokerage dealer change request.
@@ -636,7 +636,7 @@ def bd_change():
         )
 
 
-@BP.route('/bd-change-callback', methods=['POST'])
+@BP.route('/bd-change-callback', methods=['POST'], strict_slashes=False)
 def bd_change_callback():
     """
     BD change callback - receive carrier validation response.
@@ -730,7 +730,7 @@ def bd_change_callback():
         )
 
 
-@BP.route('/transfer-notification', methods=['POST'])
+@BP.route('/transfer-notification', methods=['POST'], strict_slashes=False)
 def transfer_notification():
     """
     Transfer notification - accept transfer-related notifications.
@@ -813,7 +813,7 @@ def transfer_notification():
         )
 
 
-@BP.route('/transfer-confirmation', methods=['POST'])
+@BP.route('/transfer-confirmation', methods=['POST'], strict_slashes=False)
 def transfer_confirmation():
     """
     Transfer confirmation - accept transfer confirmation from delivering entity.
@@ -900,7 +900,7 @@ def transfer_confirmation():
         )
 
 
-@BP.route('/query-status/<transaction_id>', methods=['GET'])
+@BP.route('/query-status/<transaction_id>', methods=['GET'], strict_slashes=False)
 def query_status(transaction_id):
     """
     Query transaction status
