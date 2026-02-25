@@ -1,6 +1,4 @@
-# .\scripts\deploy-lambda.ps1 -FunctionName api-insurance-carrier
-# .\scripts\deploy-lambda.ps1 -FunctionName api-broker-dealer
-# .\scripts\deploy-lambda.ps1 -FunctionName api-clearinghouse
+# .\scripts\deploy-lambda.ps1 -FunctionName api
 
 param(
     [Parameter(Mandatory=$true)]
@@ -51,6 +49,13 @@ $zipPath = Join-Path $env:TEMP "$FunctionName-$(Get-Date -Format 'yyyyMMdd-HHmms
 try {
     # Step 1: Package the Lambda function
     Write-Status "Packaging Lambda function..." "Info"
+
+    # Copy lib folder if it exists
+    $libSource = Join-Path $FunctionName "lib"
+    if (Test-Path $libSource) {
+        Write-Status "Copying lib folder..." "Info"
+        Copy-Item -Path $libSource -Destination $tempDir -Recurse -Force
+    }
 
     # Copy source files to temp directory
     Copy-Item -Path (Join-Path $FunctionName "*") -Destination $tempDir -Recurse -Force

@@ -1,3 +1,5 @@
+# .\scripts\package-lambda.ps1 -FunctionName api
+
 param(
     [string]$FunctionName = "api-broker-dealer",
     [string]$OutputDir = ".\build",
@@ -39,7 +41,15 @@ Write-Host "Packaging $FunctionName Lambda function..." -ForegroundColor Green
 Write-Host "Copying application files..."
 Copy-Item -Path "$functionDir\app.py" -Destination $lambdaPackage -Force
 
-# Install dependencies
+# Copy lambdas folder
+Write-Host "Copying lib folder..."
+$lambdasSource = Join-Path $projectRoot "lib"
+$lambdasDest = Join-Path $lambdaPackage "lib"
+if (Test-Path $lambdasSource) {
+    Copy-Item -Path $lambdasSource -Destination $lambdasDest -Recurse -Force
+}
+
+# Install dependencies from function directory
 Write-Host "Installing dependencies..."
 $requirementsFile = Join-Path $functionDir "requirements.txt"
 if (Test-Path $requirementsFile) {
