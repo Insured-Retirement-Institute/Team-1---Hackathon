@@ -120,6 +120,12 @@ function generateFakeDtccResult(searchContract: ContractRecord, index: number): 
 
 	// Determine contract status based on index
 	let contractStatus: ContractStatus
+	let ownership : OwnershipType
+	if (index === 2) {
+		ownership = OwnershipType.Custodial
+	} else {
+		ownership = randomEnumValue(OwnershipType)
+	}
 	if (index === 3) {
 		contractStatus = ContractStatus.Unappointed
 	} else if (index === 4) {
@@ -137,7 +143,7 @@ function generateFakeDtccResult(searchContract: ContractRecord, index: number): 
 			productName,
 			contractNumber: searchContract.contractNumber,
 			cusipNumber: generateCusipNumber(),
-			ownership: randomEnumValue(OwnershipType),
+			ownership,
 			trailing: Math.random() > 0.5,
 			withdrawalProgram: Math.random() > 0.5,
 			contractStatus,
@@ -302,8 +308,7 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 
 		try {
 			// Try API call
-			const transactionId = crypto.randomUUID()
-			const response = await insuranceCarrierApi.validatePolicies(transactionId, {
+			const response = await insuranceCarrierApi.validatePolicies({
 				policies: policyNumbers
 			})
 

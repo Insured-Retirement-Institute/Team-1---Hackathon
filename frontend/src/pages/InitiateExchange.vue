@@ -10,6 +10,11 @@ import { useContractResultsStore } from '@/stores/useContractResultsStore';
 import { storeToRefs } from 'pinia';
 import { useFileDialog } from '@vueuse/core';
 import { useLoaderStore } from '@/stores/useLoaderStore';
+import { brokerDealerApi } from '@/api/Api';
+import { monotonicFactory } from 'ulid';
+import { fileToBase64 } from '@/utils/fileUtils';
+
+const ulid = monotonicFactory()
 
 const contractResultsStore = useContractResultsStore()
 
@@ -25,19 +30,28 @@ const { open, onChange } = useFileDialog({
 })
 
 onChange(async files => {
+	if (!files || files.length === 0) return
+
+	const file = files[0]
+	if (!file) return
+
 	const loader = useLoaderStore()
 	loader.open('Processing Document')
 
-	await new Promise(resolve => setTimeout(resolve, 5_000))
+	try {
+		const pdfBase64 = await fileToBase64(file)
 
-	loader.close()
-	searchContracts.value = []
-	contractResultsStore.addSearchContract({ contractNumber: '43573928457' })
-	contractResultsStore.addSearchContract({ contractNumber: '549384578932' })
-	contractResultsStore.addSearchContract({ contractNumber: '3409345867457' })
-	contractResultsStore.addSearchContract({ contractNumber: 'AGD23534758' })
-	contractResultsStore.addSearchContract({ contractNumber: 'XXFGHJKDHKJ' })
-	contractResultsStore.addSearchContract({ contractNumber: 'YYU423534' })
+		const response = await brokerDealerApi.extractPolicyFromPdf({
+			requestId: ulid(),
+			pdfBase64
+		})
+
+		console.log('PDF extraction response:', response)
+	} catch (error) {
+		console.error('PDF extraction failed:', error)
+	} finally {
+		loader.close()
+	}
 })
 </script>
 

@@ -277,3 +277,9 @@ export interface ErrorResponse {
 	code: string
 	message: string
 }
+
+// PDF Extraction Request
+export interface PdfExtractionRequest {
+	requestId: string
+	pdfBase64: string
+}

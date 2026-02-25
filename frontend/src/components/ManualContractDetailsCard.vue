@@ -1,8 +1,23 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { FwbInput, FwbSelect, FwbCheckbox } from 'flowbite-vue'
 import { PlanType, AccountType, OwnershipType, type ContractRecord } from '@/models/ContractRecord'
+import CustodialInfoCard from '@/components/CustodialInfoCard.vue'
 
 const record = defineModel<ContractRecord>({ required: true })
+
+withDefaults(defineProps<{
+	displayContractData?: boolean
+}>(), {
+	displayContractData: true
+})
+
+// Initialize custodialInfo if not present
+if (!record.value.custodialInfo) {
+	record.value.custodialInfo = {}
+}
+
+const isCustodial = computed(() => record.value.ownership === OwnershipType.Custodial)
 
 const planTypeOptions = [
 	{ value: PlanType.NonQualified, name: PlanType.NonQualified },
@@ -44,7 +59,8 @@ const ownershipOptions = [
 			</div>
 		</div>
 
-		<div class="grid grid-cols-3 gap-4">
+		<!-- Contract Data Section -->
+		<div v-if="displayContractData" class="grid grid-cols-3 gap-4">
 			<FwbInput v-model="record.carrierName" label="Carrier Name" />
 			<FwbInput v-model="record.productName" label="Product Name" />
 			<FwbInput v-model="record.contractNumber" label="Contract Number" />
@@ -53,6 +69,11 @@ const ownershipOptions = [
 			<FwbSelect v-model="record.accountType" :options="accountTypeOptions" label="Account Type" />
 			<FwbSelect v-model="record.ownership" :options="ownershipOptions" label="Ownership" />
 			<FwbInput v-model="record.ownerName" label="Owner Name" />
+		</div>
+
+		<!-- Custodial Data Section -->
+		<div v-if="isCustodial" :class="{ 'mt-6': displayContractData }">
+			<CustodialInfoCard v-model="record.custodialInfo!" />
 		</div>
 	</div>
 </template>
