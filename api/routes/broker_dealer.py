@@ -507,6 +507,153 @@ def transfer_notification():
         )
 
 
+# ── SQS Trigger Routes ──────────────────────────────────────────────────────────
+# UI-facing endpoints that enqueue async work onto SQS queues.
+# The actual API calls are handled by standalone SQS-triggered Lambdas.
+
+_SQS_REGION = os.environ.get("SQS_REGION", "us-east-1")
+
+
+@BP.route('/trigger-policy-inquiry', methods=['POST'])
+def trigger_policy_inquiry():
+    """
+    Trigger a policy inquiry request via SQS.
+
+    Called by the UI (button click) to initiate a policy info fetch from
+    DTCC/IIEX.  Enqueues an SQS message; the sqs-policy-inquiry Lambda
+    handles the actual API call, DB update, and EventBridge notification.
+
+    Required header:  requestId (ULID, per spec v0.1.1)
+    Required body:    requestingFirm, client  (per PolicyInquiryRequest schema)
+    Returns:          202 with code=QUEUED
+    """
+    request_id = request.headers.get("requestId") or request.headers.get("requestid")
+    if not request_id:
+        return create_error_response("MISSING_HEADER", "requestId header is required", 400)
+
+    data = request.get_json(silent=True)
+    if not data:
+        return create_error_response("INVALID_PAYLOAD", "JSON request body is required", 400)
+
+    missing = [f for f in ("requestingFirm", "client") if f not in data]
+    if missing:
+        return create_error_response(
+            "VALIDATION_ERROR",
+            f"Missing required fields: {', '.join(missing)}",
+            400,
+        )
+
+    queue_url = os.environ.get("POLICY_INQUIRY_SQS_URL")
+    if not queue_url:
+        return create_error_response(
+            "CONFIGURATION_ERROR",
+            "Policy inquiry queue not configured",
+            500,
+        )
+
+    message = {
+        "requestId": request_id,
+        "action": "POLICY_INQUIRY",
+        "requestData": data,
+        "timestamp": get_timestamp(),
+    }
+
+    try:
+        sqs = boto3.client("sqs", region_name=_SQS_REGION)
+        sqs.send_message(
+            QueueUrl=queue_url,
+            MessageBody=json.dumps(message),
+            MessageAttributes={
+                "action": {"StringValue": "POLICY_INQUIRY", "DataType": "String"},
+            },
+        )
+    except Exception as e:
+        logger.error("Failed to enqueue policy inquiry — requestId=%s: %s", request_id, e)
+        return create_error_response("QUEUE_ERROR", "Failed to enqueue policy inquiry request", 500)
+
+    logger.info("Policy inquiry enqueued — requestId=%s", request_id)
+    return create_response(
+        "QUEUED",
+        "Policy inquiry request queued for processing",
+        request_id,
+        status_code=202,
+        processing_mode="deferred",
+        estimated_response_time="PT30S",
+    )
+
+
+@BP.route('/trigger-transfer-request', methods=['POST'])
+def trigger_transfer_request():
+    """
+    Trigger a BD change / transfer request via SQS.
+
+    Called by the UI (button click) to initiate a broker-dealer change.
+    Enqueues an SQS message; the sqs-bd-change Lambda handles the actual
+    /servicing-agent-changes/create API call, DB update, and EventBridge
+    notification.  The async carrier response arrives later via the
+    api-bd-change-callback Lambda endpoint.
+
+    Required header:  requestId (ULID, per spec v0.1.1)
+    Required body:    requestingFirm, carrier, client
+                      (per ServicingAgentChangeRequest schema v0.1.1)
+    Returns:          202 with code=QUEUED
+    """
+    request_id = request.headers.get("requestId") or request.headers.get("requestid")
+    if not request_id:
+        return create_error_response("MISSING_HEADER", "requestId header is required", 400)
+
+    data = request.get_json(silent=True)
+    if not data:
+        return create_error_response("INVALID_PAYLOAD", "JSON request body is required", 400)
+
+    required = ["requestingFirm", "carrier", "client"]
+    missing = [f for f in required if not data.get(f)]
+    if missing:
+        return create_error_response(
+            "VALIDATION_ERROR",
+            f"Missing required fields: {', '.join(missing)}",
+            400,
+        )
+
+    queue_url = os.environ.get("BD_CHANGE_SQS_URL")
+    if not queue_url:
+        return create_error_response(
+            "CONFIGURATION_ERROR",
+            "BD change queue not configured",
+            500,
+        )
+
+    message = {
+        "requestId": request_id,
+        "action": "BD_CHANGE",
+        "requestData": data,
+        "timestamp": get_timestamp(),
+    }
+
+    try:
+        sqs = boto3.client("sqs", region_name=_SQS_REGION)
+        sqs.send_message(
+            QueueUrl=queue_url,
+            MessageBody=json.dumps(message),
+            MessageAttributes={
+                "action": {"StringValue": "BD_CHANGE", "DataType": "String"},
+            },
+        )
+    except Exception as e:
+        logger.error("Failed to enqueue BD change — requestId=%s: %s", request_id, e)
+        return create_error_response("QUEUE_ERROR", "Failed to enqueue transfer request", 500)
+
+    logger.info("BD change enqueued — requestId=%s", request_id)
+    return create_response(
+        "QUEUED",
+        "Transfer request queued for processing",
+        request_id,
+        status_code=202,
+        processing_mode="deferred",
+        estimated_response_time="PT5M",
+    )
+
+
 # ── PDF Policy Statement Extractor ─────────────────────────────────────────────
 # Uses Claude via Bedrock converse() with a native document block.
 # No text-extraction library needed — Claude reads the PDF layout directly.
@@ -695,7 +842,7 @@ def extract_policy_from_pdf():
     absent fields are returned as null.
 
     Required header:
-      transactionId: <UUID>
+      requestId: <ULID>
 
     Required body fields:
       requestId   string   Caller-supplied request identifier
@@ -706,9 +853,11 @@ def extract_policy_from_pdf():
       INVALID_PDF      — base64 could not be decoded
       EXTRACTION_ERROR — Bedrock call or JSON parse failure
     """
-    transaction_id, error = validate_transaction_id(request.headers)
-    if error:
-        return error
+    # Accept requestId header (per unified spec) with transactionId fallback
+    request_id_header = request.headers.get("requestId") or request.headers.get("transactionId")
+    if not request_id_header:
+        return create_error_response("MISSING_HEADER", "requestId header is required", 400)
+    transaction_id = request_id_header
 
     data = request.get_json(silent=True)
     if not data:
@@ -997,7 +1146,7 @@ def generate_carrier_letter():
     carrier-specific requirements (proprietary form required, notarization, etc.).
 
     Required header:
-      transactionId: <UUID>
+      requestId: <ULID>
 
     Required body fields (see schemas/carrier_letter_request.schema.json):
       requestId           string   Caller-supplied identifier
@@ -1021,9 +1170,11 @@ def generate_carrier_letter():
       CARRIER_OWN_FORM    — carrier requires its own proprietary form; letter not generated
       VALIDATION_ERROR    — missing required fields or carrier address unresolvable
     """
-    transaction_id, error = validate_transaction_id(request.headers)
-    if error:
-        return error
+    # Accept requestId header (per unified spec) with transactionId fallback
+    request_id_header = request.headers.get("requestId") or request.headers.get("transactionId")
+    if not request_id_header:
+        return create_error_response("MISSING_HEADER", "requestId header is required", 400)
+    transaction_id = request_id_header
 
     data = request.get_json(silent=True)
     if not data:
