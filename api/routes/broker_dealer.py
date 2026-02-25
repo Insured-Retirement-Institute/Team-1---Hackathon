@@ -4,10 +4,6 @@ Implements the OpenAPI specification for broker-dealer endpoints
 Integrated with DynamoDB distributor tables.
 """
 
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../lib/utils'))
-
 from flask import request, jsonify, Blueprint
 from datetime import datetime, timezone
 import uuid

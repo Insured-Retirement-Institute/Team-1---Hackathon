@@ -3,10 +3,6 @@ Insurance Carrier API Flask Application
 Implements the OpenAPI specification for insurance carrier endpoints
 """
 
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../lib/utils'))
-
 from flask import request, jsonify, Blueprint
 from datetime import datetime
 import uuid
@@ -14,6 +10,7 @@ import logging
 from helpers import (create_response,
                      create_error_response,
                      validate_transaction_id)
+from dynamodb_utils import get_item, scan_items, Attr
 
 BP = Blueprint('insurance-carrier', __name__)
 

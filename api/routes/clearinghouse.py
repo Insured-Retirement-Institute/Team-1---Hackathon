@@ -4,10 +4,6 @@ Implements the OpenAPI specification for clearinghouse endpoints
 Integrated with DynamoDB request-tracking table.
 """
 
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../lib/utils'))
-
 from flask import request, jsonify, Blueprint
 from datetime import datetime, timezone
 import uuid
