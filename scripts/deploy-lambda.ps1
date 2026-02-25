@@ -1,6 +1,4 @@
-# .\scripts\deploy-lambda.ps1 -FunctionName api-insurance-carrier
-# .\scripts\deploy-lambda.ps1 -FunctionName api-broker-dealer
-# .\scripts\deploy-lambda.ps1 -FunctionName api-clearinghouse
+# .\scripts\deploy-lambda.ps1 -FunctionName api
 
 param(
     [Parameter(Mandatory=$true)]

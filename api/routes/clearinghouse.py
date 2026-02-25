@@ -3,63 +3,21 @@ Clearinghouse API Flask Application
 Implements the OpenAPI specification for clearinghouse endpoints
 """
 
-from flask import Flask, request, jsonify
+from flask import request, jsonify, Blueprint
 from datetime import datetime
-import serverless_wsgi
 import uuid
 import logging
+from helpers import (create_response,
+                     create_error_response,
+                     validate_transaction_id)
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__)
+BP = Blueprint('clearinghouse', __name__)
 
 
-# Response helpers
-def create_response(code, message, transaction_id, status_code=200):
-    """
-    Create standardized clearinghouse response
-    Note: Clearinghouse ALWAYS returns deferred responses (no payload)
-    """
-    response = {
-        "code": code,
-        "message": message,
-        "transactionId": transaction_id,
-        "payload": None
-    }
-    return jsonify(response), status_code
-
-
-def create_error_response(code, message, status_code=400):
-    """Create standardized error response"""
-    return jsonify({
-        "code": code,
-        "message": message
-    }), status_code
-
-
-def validate_transaction_id(headers):
-    """Validate transaction ID in headers"""
-    transaction_id = headers.get('transactionId')
-    if not transaction_id:
-        return None, create_error_response(
-            "MISSING_HEADER",
-            "transactionId header is required",
-            400
-        )
-    try:
-        uuid.UUID(transaction_id)
-        return transaction_id, None
-    except ValueError:
-        return None, create_error_response(
-            "INVALID_HEADER",
-            "transactionId must be a valid UUID",
-            400
-        )
-
-
-@app.route('/health', methods=['GET'])
+@BP.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
     return jsonify({
@@ -69,7 +27,7 @@ def health_check():
     }), 200
 
 
-@app.route('/submit-policy-inquiry-request', methods=['POST'])
+@BP.route('/submit-policy-inquiry-request', methods=['POST'])
 def submit_policy_inquiry_request():
     """
     Receive policy inquiry request from receiving broker
@@ -126,7 +84,7 @@ def submit_policy_inquiry_request():
         )
 
 
-@app.route('/submit-policy-inquiry-response', methods=['POST'])
+@BP.route('/submit-policy-inquiry-response', methods=['POST'])
 def submit_policy_inquiry_response():
     """
     Receive policy inquiry response from delivering broker
@@ -186,7 +144,7 @@ def submit_policy_inquiry_response():
         )
 
 
-@app.route('/receive-bd-change-request', methods=['POST'])
+@BP.route('/receive-bd-change-request', methods=['POST'])
 def receive_bd_change_request():
     """
     Receive BD change request from receiving broker
@@ -242,7 +200,7 @@ def receive_bd_change_request():
         )
 
 
-@app.route('/receive-carrier-response', methods=['POST'])
+@BP.route('/receive-carrier-response', methods=['POST'])
 def receive_carrier_response():
     """
     Receive carrier validation response
@@ -310,7 +268,7 @@ def receive_carrier_response():
         )
 
 
-@app.route('/receive-transfer-confirmation', methods=['POST'])
+@BP.route('/receive-transfer-confirmation', methods=['POST'])
 def receive_transfer_confirmation():
     """
     Receive transfer confirmation from delivering broker
@@ -373,7 +331,7 @@ def receive_transfer_confirmation():
         )
 
 
-@app.route('/query-status/<transaction_id>', methods=['GET'])
+@BP.route('/query-status/<transaction_id>', methods=['GET'])
 def query_status(transaction_id):
     """
     Query transaction status
@@ -447,66 +405,3 @@ def query_status(transaction_id):
             "Internal server error occurred",
             500
         )
-
-
-@app.errorhandler(404)
-def not_found(e):
-    """Handle 404 errors"""
-    return create_error_response(
-        "NOT_FOUND",
-        "The requested resource was not found",
-        404
-    )
-
-
-@app.errorhandler(405)
-def method_not_allowed(e):
-    """Handle 405 errors"""
-    return create_error_response(
-        "METHOD_NOT_ALLOWED",
-        "The HTTP method is not allowed for this endpoint",
-        405
-    )
-
-
-@app.errorhandler(500)
-def internal_error(e):
-    """Handle 500 errors"""
-    logger.error(f"Internal server error: {str(e)}")
-    return create_error_response(
-        "INTERNAL_ERROR",
-        "An internal server error occurred",
-        500
-    )
-
-
-def _normalize_lambda_event(event):
-    """Ensure required WSGI fields are present for serverless_wsgi."""
-    if not event:
-        return event
-
-    headers = event.get("headers")
-    if not isinstance(headers, dict):
-        headers = {}
-
-    if "X-Forwarded-Proto" not in headers and "x-forwarded-proto" not in headers:
-        protocol = (event.get("requestContext") or {}).get("http", {}).get("protocol")
-        scheme = None
-        if isinstance(protocol, str) and protocol:
-            scheme = protocol.split("/")[0].lower()
-        if not scheme:
-            scheme = "https"
-        headers["X-Forwarded-Proto"] = scheme
-
-    event["headers"] = headers
-    return event
-
-
-def lambda_handler(event, context):
-    event = _normalize_lambda_event(event)
-    return serverless_wsgi.handle_request(app, event, context)
-
-
-if __name__ == '__main__':
-    # For local development only
-    app.run(debug=True, host='0.0.0.0', port=5001)
