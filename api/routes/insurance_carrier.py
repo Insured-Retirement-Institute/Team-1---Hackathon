@@ -616,19 +616,26 @@ def policy_inquiry_callback():
         return create_error_response("INTERNAL_ERROR", "Internal server error occurred", 500)
 
 
+@BP.route('/receive-bd-change-request', methods=['POST'])
 @BP.route('/bd-change', methods=['POST'])
-def bd_change():
+def receive_bd_change_request():
     """
-    Brokerage dealer change request.
-    Validates and approves/rejects broker-dealer changes.
+    Receive a BD change validation request and return a synchronous IGO/NIGO determination.
 
-    The carrier performs validation checks including:
-    - Agent licensing verification
-    - Carrier appointment verification
-    - Suitability requirements
-    - Policy-specific rules
+    This is the primary integration point between the clearinghouse/BD and the carrier's
+    AI-powered validation engine (Amazon Bedrock AgentCore).
 
-    Unified API endpoint - replaces /receive-bd-change-request
+    Routes: POST /receive-bd-change-request  (canonical)
+            POST /bd-change                   (alias per Unified Brokerage Transfer API spec)
+
+    The AgentCore carrier agent evaluates all 9 business rules:
+      RULE-001 through RULE-009 (signatures, agent status, appointment, E&O, licensing,
+      broker selling agreement).
+
+    Response codes:
+      APPROVED  — IGO: all hard-stop rules passed
+      REJECTED  — NIGO: one or more rules failed; payload has per-rule results
+      ERROR     — AgentCore invocation failed
     """
     transaction_id, error = validate_transaction_id(request.headers)
     if error:
