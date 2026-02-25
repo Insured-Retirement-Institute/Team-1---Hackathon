@@ -89,48 +89,48 @@ export const clearinghouseApi = {
 		}),
 
 	receiveBdChangeRequest: (
-		transactionId: string,
+		requestId: string,
 		request: BdChangeRequest
 	): Promise<StandardResponse> =>
 		fetchJson(`${CLEARINGHOUSE_API}/receive-bd-change-request`, {
 			method: 'POST',
-			headers: { transactionId },
+			headers: { requestId },
 			body: JSON.stringify(request)
 		}),
 
 	receiveCarrierResponse: (
-		transactionId: string,
+		requestId: string,
 		response: CarrierResponse
 	): Promise<StandardResponse> =>
 		fetchJson(`${CLEARINGHOUSE_API}/receive-carrier-response`, {
 			method: 'POST',
-			headers: { transactionId },
+			headers: { requestId },
 			body: JSON.stringify(response)
 		}),
 
 	receiveTransferConfirmation: (
-		transactionId: string,
+		requestId: string,
 		confirmation: TransferConfirmation
 	): Promise<StandardResponse> =>
 		fetchJson(`${CLEARINGHOUSE_API}/receive-transfer-confirmation`, {
 			method: 'POST',
-			headers: { transactionId },
+			headers: { requestId },
 			body: JSON.stringify(confirmation)
 		}),
 
-	queryTransactionStatus: (transactionId: string): Promise<TransactionStatus> =>
-		fetchJson(`${CLEARINGHOUSE_API}/query-status/${transactionId}`)
+	queryTransactionStatus: (requestId: string): Promise<TransactionStatus> =>
+		fetchJson(`${CLEARINGHOUSE_API}/query-status/${requestId}`)
 }
 
 // Broker-Dealer API endpoints (for direct broker queries)
 export const brokerDealerApi = {
 	queryPolicies: (
-		transactionId: string,
+		requestId: string,
 		request: PolicyInquiryRequest
 	): Promise<PolicyInquiryResponse> =>
 		fetchJson(`${BROKER_DEALER_API}/query-policies`, {
 			method: 'POST',
-			headers: { transactionId },
+			headers: { requestId },
 			body: JSON.stringify(request)
 		}),
 
@@ -166,8 +166,8 @@ export const brokerDealerApi = {
 			body: JSON.stringify(notification)
 		}),
 
-	queryTransactionStatus: (transactionId: string): Promise<TransactionStatus> =>
-		fetchJson(`${BROKER_DEALER_API}/query-status/${transactionId}`),
+	queryTransactionStatus: (requestId: string): Promise<TransactionStatus> =>
+		fetchJson(`${BROKER_DEALER_API}/query-status/${requestId}`),
 
 	extractPolicyFromPdf: (
 		request: PdfExtractionRequest

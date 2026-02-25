@@ -57,7 +57,7 @@ function formatOwnership(ownership: string) {
         <div>
           <h2 class="text-2xl font-bold text-gray-900">{{ policy.policyNumber }}</h2>
           <p class="mt-1 text-sm text-gray-500">
-            Transaction ID: {{ policy.transactionId }}
+            Transaction ID: {{ policy.requestId }}
           </p>
         </div>
         <StatusBadge :status="policy.currentStatus" />

@@ -9,7 +9,7 @@ Flow
 2. POST the PolicyInquiryRequest to the internal IIEX/DTCC API
    at {INTERNAL_API_BASE_URL}/policy-inquiry.
 3. Write the API response back to the `transact` DynamoDB table
-   (keyed on transactionId).
+   (keyed on requestId).
 4. Publish a TransactionUpdate event to EventBridge so the frontend
    knows to refresh.
 
@@ -56,7 +56,7 @@ def _now() -> str:
 _http = urllib3.PoolManager()
 
 
-def call_policy_inquiry_api(transaction_id: str, request_data: dict) -> dict:
+def call_policy_inquiry_api(request_id: str, request_data: dict) -> dict:
     """POST /policy-inquiries/create on the internal API and return the parsed response."""
     url = f"{INTERNAL_API_BASE_URL}/policy-inquiries/create"
 
@@ -66,7 +66,7 @@ def call_policy_inquiry_api(transaction_id: str, request_data: dict) -> dict:
         body=json.dumps(request_data).encode("utf-8"),
         headers={
             "Content-Type": "application/json",
-            "requestId": transaction_id,
+            "requestId": request_id,
         },
         timeout=30,
     )
@@ -83,7 +83,7 @@ def call_policy_inquiry_api(transaction_id: str, request_data: dict) -> dict:
 # Step 2 – persist to DynamoDB
 # ---------------------------------------------------------------------------
 
-def update_transact_record(transaction_id: str, api_response: dict) -> None:
+def update_transact_record(request_id: str, api_response: dict) -> None:
     """Upsert the policy inquiry result into the transact table."""
     code = api_response.get("code", "UNKNOWN")
     # Treat IMMEDIATE / RECEIVED as a data-received status; anything else is deferred
@@ -97,7 +97,7 @@ def update_transact_record(transaction_id: str, api_response: dict) -> None:
 
     now = _now()
     table.update_item(
-        Key={"pk": transaction_id, "sk": "TRANSACTION"},
+        Key={"pk": request_id, "sk": "TRANSACTION"},
         UpdateExpression=(
             "SET #status   = :status, "
             "#updated      = :updated, "
@@ -120,8 +120,8 @@ def update_transact_record(transaction_id: str, api_response: dict) -> None:
         },
     )
     logger.info(
-        "Transact record updated — transactionId=%s status=%s",
-        transaction_id, new_status,
+        "Transact record updated — requestId=%s status=%s",
+        request_id, new_status,
     )
 
 
@@ -129,12 +129,12 @@ def update_transact_record(transaction_id: str, api_response: dict) -> None:
 # Step 3 – fire EventBridge event
 # ---------------------------------------------------------------------------
 
-def fire_eventbridge_event(transaction_id: str, verb: str) -> None:
+def fire_eventbridge_event(request_id: str, verb: str) -> None:
     """Publish a UI-facing TransactionUpdate event to EventBridge."""
     events = boto3.client("events", region_name=REGION)
     detail = {
         "verb": verb,
-        "transactionId": transaction_id,
+        "requestId": request_id,
         "timestamp": _now(),
     }
     events.put_events(Entries=[{
@@ -144,8 +144,8 @@ def fire_eventbridge_event(transaction_id: str, verb: str) -> None:
         "EventBusName": EVENTBRIDGE_BUS_NAME,
     }])
     logger.info(
-        "EventBridge event fired — transactionId=%s verb=%s",
-        transaction_id, verb,
+        "EventBridge event fired — requestId=%s verb=%s",
+        request_id, verb,
     )
 
 
@@ -155,19 +155,19 @@ def fire_eventbridge_event(transaction_id: str, verb: str) -> None:
 
 def process_record(record: dict) -> None:
     body = json.loads(record["body"])
-    transaction_id = body["requestId"]
+    request_id = body["requestId"]
     request_data   = body["requestData"]
 
-    logger.info("Processing policy inquiry — transactionId=%s", transaction_id)
+    logger.info("Processing policy inquiry — requestId=%s", request_id)
 
-    api_response = call_policy_inquiry_api(transaction_id, request_data)
+    api_response = call_policy_inquiry_api(request_id, request_data)
     logger.info(
-        "Policy inquiry API response — code=%s transactionId=%s",
-        api_response.get("code"), transaction_id,
+        "Policy inquiry API response — code=%s requestId=%s",
+        api_response.get("code"), request_id,
     )
 
-    update_transact_record(transaction_id, api_response)
-    fire_eventbridge_event(transaction_id, "policy_info_received")
+    update_transact_record(request_id, api_response)
+    fire_eventbridge_event(request_id, "policy_info_received")
 
 
 # ---------------------------------------------------------------------------

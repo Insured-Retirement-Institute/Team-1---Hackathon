@@ -41,11 +41,11 @@ function formatPlanType(planType: string) {
     <ul class="divide-y divide-gray-200 max-h-[600px] overflow-auto">
       <li
         v-for="policy in policies"
-        :key="policy.transactionId"
+        :key="policy.requestId"
         @click="emit('select', policy)"
         :class="[
           'px-4 py-4 cursor-pointer transition-colors hover:bg-gray-50',
-          selectedId === policy.transactionId ? 'bg-blue-50 border-l-4 border-blue-500' : ''
+          selectedId === policy.requestId ? 'bg-blue-50 border-l-4 border-blue-500' : ''
         ]"
       >
         <div class="flex items-center justify-between">

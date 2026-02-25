@@ -24,7 +24,7 @@ insurance_carriers_prefix = "/api/insurance-carriers"
 def create_response(
     code,
     message,
-    transaction_id,
+    request_id,
     payload=None,
     status_code=200,
     processing_mode=None,
@@ -36,7 +36,7 @@ def create_response(
     Args:
         code: Response code (e.g., "IMMEDIATE", "DEFERRED", "RECEIVED")
         message: Human-readable response message
-        transaction_id: Unique transaction identifier (required)
+        request_id: Unique transaction identifier (required)
         payload: Optional response payload (e.g., PolicyInquiryResponse)
         status_code: HTTP status code (default 200)
         processing_mode: Optional - "immediate", "deferred", or "queued"
@@ -45,7 +45,7 @@ def create_response(
     response = {
         "code": code,
         "message": message,
-        "requestId": transaction_id
+        "requestId": request_id
     }
     if payload is not None:
         response["payload"] = payload
@@ -64,22 +64,22 @@ def create_error_response(code, message, status_code=400):
     }), status_code
 
 
-def validate_transaction_id(headers):
+def validate_request_id(headers):
     """Validate transaction ID in headers"""
-    transaction_id = headers.get('transactionId')
-    if not transaction_id:
+    request_id = headers.get('requestId')
+    if not request_id:
         return None, create_error_response(
             "MISSING_HEADER",
-            "transactionId header is required",
+            "requestId header is required",
             400
         )
     try:
-        uuid.UUID(transaction_id)
-        return transaction_id, None
+        uuid.UUID(request_id)
+        return request_id, None
     except ValueError:
         return None, create_error_response(
             "INVALID_HEADER",
-            "transactionId must be a valid UUID",
+            "requestId must be a valid UUID",
             400
         )
 

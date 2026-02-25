@@ -8,7 +8,7 @@ the same AgentCore carrier agent:
   POST /api/insurance-carriers/bd-change                  (unified-brokerage-transfer-api.yaml)
 
 Required header for all POST requests:
-  transactionId: <UUID>
+  requestId: <UUID>
 
 The AgentCore carrier agent:
   1. Looks up each policy in the carrier DynamoDB table.
@@ -18,7 +18,7 @@ The AgentCore carrier agent:
 
 import uuid
 
-TRANSACTION_ID = str(uuid.uuid4())
+REQUEST_ID = str(uuid.uuid4())
 
 # ── Carrier BD Change Request — IGO scenario ──────────────────────────────────
 # Policy ATH-100053 exists in the carrier DynamoDB table (owner SSN 434558122).
@@ -103,7 +103,7 @@ BD_CHANGE_REQUEST_NIGO = {
 API_RESPONSE_IGO = {
     "code": "APPROVED",
     "message": "Servicing agent change approved — all business rules passed",
-    "transactionId": TRANSACTION_ID,
+    "requestId": REQUEST_ID,
     "processingMode": "immediate",
     "payload": {
         "request-id": "...",
@@ -142,7 +142,7 @@ API_RESPONSE_IGO = {
 API_RESPONSE_NIGO = {
     "code": "REJECTED",
     "message": "Servicing agent change rejected — 7 of 9 rules failed",
-    "transactionId": TRANSACTION_ID,
+    "requestId": REQUEST_ID,
     "processingMode": "immediate",
     "payload": {
         "request-id": "...",
@@ -189,7 +189,7 @@ TRANSFER_NOTIFICATION = {
 # ── Request headers ───────────────────────────────────────────────────────────
 HEADERS = {
     "Content-Type": "application/json",
-    "transactionId": TRANSACTION_ID
+    "requestId": REQUEST_ID
 }
 
 if __name__ == "__main__":

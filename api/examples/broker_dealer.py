@@ -3,7 +3,7 @@ Test examples for Broker-Dealer API endpoints
 """
 
 # Example transaction ID (UUID v4)
-TRANSACTION_ID = "123e4567-e89b-12d3-a456-426614174000"
+REQUEST_ID = "123e4567-e89b-12d3-a456-426614174000"
 
 # Example Policy Inquiry Request
 POLICY_INQUIRY_REQUEST = {
@@ -66,7 +66,7 @@ POLICY_INQUIRY_RESPONSE = {
 
 # Example BD Change Request
 BD_CHANGE_REQUEST = {
-    "transaction-id": TRANSACTION_ID,
+    "request-id": REQUEST_ID,
     "receiving-broker-id": "BROKER-001",
     "delivering-broker-id": "BROKER-002",
     "carrier-id": "CARRIER-PL",
@@ -85,7 +85,7 @@ BD_CHANGE_REQUEST = {
 
 # Example Transfer Notification
 TRANSFER_NOTIFICATION = {
-    "transaction-id": TRANSACTION_ID,
+    "request-id": REQUEST_ID,
     "notification-type": "transfer-approved",
     "policy-id": "POL-001",
     "receiving-broker-id": "BROKER-001",
@@ -100,7 +100,7 @@ TRANSFER_NOTIFICATION = {
 # Example headers
 HEADERS = {
     "Content-Type": "application/json",
-    "transactionId": TRANSACTION_ID
+    "requestId": REQUEST_ID
 }
 
 if __name__ == "__main__":

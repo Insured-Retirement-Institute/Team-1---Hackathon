@@ -357,7 +357,7 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 				receivingBrokerId: 'BD002',
 			})
 
-			requestId = result.request.transactionId
+			requestId = result.request.requestId
 		} catch {
 
 		} finally {

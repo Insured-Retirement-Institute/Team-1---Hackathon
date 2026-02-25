@@ -115,7 +115,7 @@ function getStatusColor(status: string): BadgeType {
 				<tbody>
 					<tr
 						v-for="(change, index) in sortedChanges"
-						:key="change.transactionId"
+						:key="change.requestId"
 						:class="[
 							'bg-[#f8f8f8]',
 							index < sortedChanges.length - 1 ? 'border-b dark:border-gray-700 border-gray-200' : ''
