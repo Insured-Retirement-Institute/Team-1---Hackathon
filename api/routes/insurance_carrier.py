@@ -14,7 +14,6 @@ import logging
 from helpers import (create_response,
                      create_error_response,
                      validate_transaction_id)
-from dynamodb_utils import get_item, scan_items, Attr
 
 BP = Blueprint('insurance-carrier', __name__)
 
@@ -261,7 +260,8 @@ def submit_policy_inquiry_request():
             }
         }
 
-        logger.info(f"Returning {len(policies)} policies for transaction {transaction_id}")
+        logger.info(
+            f"Returning {len(policies)} policies for transaction {transaction_id}")
 
         # Return immediate response with policy data
         return create_response(
@@ -313,7 +313,8 @@ def submit_policy_inquiry_response():
                 400
             )
 
-        logger.info(f"Submitting policy inquiry response - Transaction ID: {transaction_id}")
+        logger.info(
+            f"Submitting policy inquiry response - Transaction ID: {transaction_id}")
         logger.info(f"Client: {data.get('client', {}).get('clientName')}")
         logger.info(f"Policies count: {len(data.get('client', {}).get('policies', []))}")
 
