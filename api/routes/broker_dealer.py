@@ -78,8 +78,8 @@ def submit_policy_inquiry_request():
         return create_response(
             "DEFERRED",
             "Policy inquiry request received and queued for processing",
-            None,
-            200
+            transaction_id,
+            processing_mode="deferred"
         )
 
     except Exception as e:
@@ -130,8 +130,7 @@ def receive_policy_inquiry_response():
         return create_response(
             "RECEIVED",
             "Policy inquiry response received successfully",
-            None,
-            200
+            transaction_id
         )
 
     except Exception as e:
@@ -184,8 +183,7 @@ def receive_bd_change_request():
         return create_response(
             "RECEIVED",
             "BD change request received successfully",
-            None,
-            200
+            transaction_id
         )
 
     except Exception as e:
@@ -246,8 +244,7 @@ def receive_transfer_notification():
         return create_response(
             "RECEIVED",
             f"Transfer notification '{notification_type}' received successfully",
-            None,
-            200
+            transaction_id
         )
 
     except Exception as e:

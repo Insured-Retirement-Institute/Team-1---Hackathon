@@ -161,32 +161,17 @@ def generate_sample_records(count: int = 15) -> list:
     return records
 
 
-def create_table_if_not_exists(dynamodb_client):
-    """Create the request-tracking table if it doesn't exist."""
+def verify_table_exists(dynamodb_client):
+    """Verify the request-tracking table exists."""
     try:
-        dynamodb_client.describe_table(TableName=TABLE_NAME)
-        print(f"Table '{TABLE_NAME}' already exists.")
+        response = dynamodb_client.describe_table(TableName=TABLE_NAME)
+        status = response["Table"]["TableStatus"]
+        print(f"Table '{TABLE_NAME}' exists (status: {status}).")
         return True
     except dynamodb_client.exceptions.ResourceNotFoundException:
-        print(f"Creating table '{TABLE_NAME}'...")
-        dynamodb_client.create_table(
-            TableName=TABLE_NAME,
-            KeySchema=[
-                {"AttributeName": "pk", "KeyType": "HASH"},
-                {"AttributeName": "sk", "KeyType": "RANGE"},
-            ],
-            AttributeDefinitions=[
-                {"AttributeName": "pk", "AttributeType": "S"},
-                {"AttributeName": "sk", "AttributeType": "S"},
-            ],
-            BillingMode="PAY_PER_REQUEST",
-        )
-
-        # Wait for table to be active
-        waiter = dynamodb_client.get_waiter("table_exists")
-        waiter.wait(TableName=TABLE_NAME)
-        print(f"Table '{TABLE_NAME}' created successfully.")
-        return True
+        print(f"ERROR: Table '{TABLE_NAME}' does not exist!")
+        print("Please create the table first or check the TABLE_NAME environment variable.")
+        return False
 
 
 def load_data(records: list):
@@ -215,8 +200,9 @@ def main():
     # Create DynamoDB client
     dynamodb_client = boto3.client("dynamodb", region_name=REGION)
 
-    # Create table if needed
-    create_table_if_not_exists(dynamodb_client)
+    # Verify table exists
+    if not verify_table_exists(dynamodb_client):
+        return
 
     # Generate sample data
     records = generate_sample_records(15)

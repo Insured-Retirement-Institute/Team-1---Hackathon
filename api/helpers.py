@@ -21,14 +21,38 @@ insurance_carriers_prefix = "/api/insurance-carriers"
 
 
 # Response helpers
-def create_response(code, message, payload=None, status_code=200):
-    """Create standardized response"""
+def create_response(
+    code,
+    message,
+    transaction_id,
+    payload=None,
+    status_code=200,
+    processing_mode=None,
+    estimated_response_time=None
+):
+    """
+    Create standardized response per StandardResponse schema.
+
+    Args:
+        code: Response code (e.g., "IMMEDIATE", "DEFERRED", "RECEIVED")
+        message: Human-readable response message
+        transaction_id: Unique transaction identifier (required)
+        payload: Optional response payload (e.g., PolicyInquiryResponse)
+        status_code: HTTP status code (default 200)
+        processing_mode: Optional - "immediate", "deferred", or "queued"
+        estimated_response_time: Optional - ISO 8601 duration (e.g., "PT5M")
+    """
     response = {
         "code": code,
-        "message": message
+        "message": message,
+        "transactionId": transaction_id
     }
     if payload is not None:
         response["payload"] = payload
+    if processing_mode is not None:
+        response["processingMode"] = processing_mode
+    if estimated_response_time is not None:
+        response["estimatedResponseTime"] = estimated_response_time
     return jsonify(response), status_code
 
 
