@@ -6,10 +6,13 @@ Integrated with DynamoDB distributor tables.
 
 from flask import request, jsonify, Blueprint
 from datetime import datetime, timezone
+import base64
+import json
 import uuid
 import logging
 from dotenv import load_dotenv
 load_dotenv(override=False)
+import boto3
 from helpers import (create_response,
                      create_error_response,
                      validate_transaction_id)
