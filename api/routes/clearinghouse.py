@@ -3,7 +3,7 @@ Clearinghouse API Flask Application
 Implements the OpenAPI specification for clearinghouse endpoints
 Integrated with DynamoDB request-tracking table.
 """
-
+import os
 from flask import request, jsonify, Blueprint
 from datetime import datetime, timezone
 import uuid
