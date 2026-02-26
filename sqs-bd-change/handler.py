@@ -37,7 +37,7 @@ logger.setLevel(logging.INFO)
 
 INTERNAL_API_BASE_URL = os.environ.get(
     "INTERNAL_API_BASE_URL",
-    "https://3wn6kzs5h6.execute-api.us-east-1.amazonaws.com/prod",
+    "https://sv4fyqvgj3vwuwflc5olwwa4xq0hcele.lambda-url.us-east-1.on.aws/v1"
 ).rstrip("/")
 TRANSACT_TABLE = os.environ.get("TRANSACT_TABLE", "transact")
 EVENTBRIDGE_BUS_NAME = os.environ.get("EVENTBRIDGE_BUS_NAME", "hackathon-events")
@@ -61,7 +61,7 @@ _http = urllib3.PoolManager()
 
 def call_bd_change_api(request_id: str, request_data: dict) -> dict:
     """POST /servicing-agent-changes/create on the internal API and return the parsed response."""
-    url = f"{INTERNAL_API_BASE_URL}/servicing-agent-changes/create"
+    url = f"{INTERNAL_API_BASE_URL}/broker-dealer/servicing-agent-changes/create"
 
     resp = _http.request(
         "POST",
