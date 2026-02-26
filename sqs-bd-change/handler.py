@@ -63,7 +63,7 @@ _http = urllib3.PoolManager()
 
 def call_bd_change_api(request_id: str, request_data: dict) -> dict:
     """POST /servicing-agent-changes/create on the internal API and return the parsed response."""
-    url = f"{INTERNAL_API_BASE_URL}/broker-dealer/servicing-agent-changes/create"
+    url = f"{INTERNAL_API_BASE_URL}/servicing-agent-changes/create"
 
     resp = _http.request(
         "POST",
