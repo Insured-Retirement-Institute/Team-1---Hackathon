@@ -4,14 +4,18 @@ Implements the OpenAPI specification for clearinghouse endpoints
 Integrated with DynamoDB request-tracking table.
 """
 import os
+import re
 from flask import request, jsonify, Blueprint
 from datetime import datetime, timezone
 import sys
 import uuid
 import logging
+
+# ULID validation: 26 chars using Crockford's Base32 (excludes I, L, O, U)
+_ULID_PATTERN = re.compile(r'^[0-9A-HJKMNP-TV-Z]{26}$', re.IGNORECASE)
 from helpers import (create_response,
                      create_error_response,
-                     validate_transaction_id)
+                     validate_request_id)
 sys.path.insert(0, "../")
 sys.path.insert(0, "../../")
 from lib.utils.dynamodb_utils import get_item, put_item, update_item, scan_items, query_items, Attr, Key
@@ -74,7 +78,7 @@ def get_timestamp() -> str:
 
 
 def create_tracking_record(
-    transaction_id: str,
+    request_id: str,
     initial_status: str,
     receiving_broker_id: str = None,
     delivering_broker_id: str = None,
@@ -90,9 +94,9 @@ def create_tracking_record(
     sk = str(uuid.uuid4())
 
     record = {
-        "pk": transaction_id,
+        "pk": request_id,
         "sk": sk,
-        "transactionId": transaction_id,
+        "requestId": request_id,
         "currentStatus": initial_status,
         "createdAt": timestamp,
         "updatedAt": timestamp,
@@ -117,12 +121,12 @@ def create_tracking_record(
     return record
 
 
-def get_tracking_record(transaction_id: str) -> dict:
+def get_tracking_record(request_id: str) -> dict:
     """Get a tracking record by transaction ID."""
     try:
         items = query_items(
             REQUEST_TRACKING_TABLE,
-            transaction_id
+            request_id
         )
         return items[0] if items else None
     except Exception as e:
@@ -131,7 +135,7 @@ def get_tracking_record(transaction_id: str) -> dict:
 
 
 def update_tracking_status(
-    transaction_id: str,
+    request_id: str,
     sk: str,
     new_status: str,
     notes: str = None
@@ -145,7 +149,7 @@ def update_tracking_status(
 
     return update_item(
         REQUEST_TRACKING_TABLE,
-        transaction_id,
+        request_id,
         sk,
         update_expression="SET currentStatus = :status, updatedAt = :updated, statusHistory = list_append(statusHistory, :history_item)",
         expression_values={
@@ -172,7 +176,7 @@ def get_carrier_info(policy_numbers: list) -> tuple:
 
 
 def create_capability_response(
-    transaction_id: str,
+    request_id: str,
     message: str,
     capability_status: str,
     capability_level: str = "none",
@@ -183,7 +187,7 @@ def create_capability_response(
     response = {
         "code": "NOT_CAPABLE",
         "message": message,
-        "transactionId": transaction_id,
+        "requestId": request_id,
         "capabilityStatus": capability_status,
         "capabilityLevel": capability_level,
     }
@@ -269,7 +273,7 @@ def dtcc_policy_inquiry():
 
     This is the clearinghouse's cached/aggregated view of policy data.
     """
-    transaction_id, error = validate_transaction_id(request.headers)
+    request_id, error = validate_request_id(request.headers)
     if error:
         return error
 
@@ -293,7 +297,7 @@ def dtcc_policy_inquiry():
         client = data.get('client', {})
         servicing_agent = requesting_firm.get('servicingAgent', {})
 
-        logger.info(f"[DTCC/IIEX] Policy inquiry - Transaction ID: {transaction_id}")
+        logger.info(f"[DTCC/IIEX] Policy inquiry - Transaction ID: {request_id}")
         logger.info(f"[DTCC/IIEX] Client: {client.get('clientName')}")
         logger.info(f"[DTCC/IIEX] Policy Numbers: {client.get('policyNumbers', [])}")
 
@@ -351,12 +355,12 @@ def dtcc_policy_inquiry():
         }
 
         logger.info(
-            f"[DTCC/IIEX] Returning {len(policies)} policies for transaction {transaction_id}")
+            f"[DTCC/IIEX] Returning {len(policies)} policies for transaction {request_id}")
 
         return create_response(
             "IMMEDIATE",
             "Policy inquiry processed successfully from IIEX cache",
-            transaction_id,
+            request_id,
             response_payload,
             200,
             processing_mode="cached"
@@ -380,7 +384,7 @@ def policy_inquiry():
 
     Unified API endpoint - replaces /submit-policy-inquiry-request
     """
-    transaction_id, error = validate_transaction_id(request.headers)
+    request_id, error = validate_request_id(request.headers)
     if error:
         return error
 
@@ -405,7 +409,7 @@ def policy_inquiry():
         client = data.get('client', {})
         policy_numbers = client.get('policyNumbers', [])
 
-        logger.info(f"Received policy inquiry request - Transaction ID: {transaction_id}")
+        logger.info(f"Received policy inquiry request - Transaction ID: {request_id}")
         logger.info(f"Requesting Firm: {requesting_firm.get('firmName')}")
         logger.info(f"Client: {client.get('clientName')}")
         logger.info(f"Policy Numbers: {policy_numbers}")
@@ -419,7 +423,7 @@ def policy_inquiry():
 
         # Create tracking record
         record = create_tracking_record(
-            transaction_id=transaction_id,
+            request_id=request_id,
             initial_status="MANIFEST_REQUESTED",
             receiving_broker_id=requesting_firm.get('firmId'),
             delivering_broker_id=None,  # To be determined
@@ -436,12 +440,12 @@ def policy_inquiry():
         record["additionalData"]["clientRequest"] = client
 
         put_item(REQUEST_TRACKING_TABLE, record)
-        logger.info(f"Created tracking record for transaction {transaction_id}")
+        logger.info(f"Created tracking record for transaction {request_id}")
 
         return create_response(
             "RECEIVED",
             "Policy inquiry request received and routed to delivering broker",
-            transaction_id,
+            request_id,
             processing_mode="deferred"
         )
 
@@ -463,7 +467,7 @@ def policy_inquiry_callback():
 
     Unified API endpoint - replaces /submit-policy-inquiry-response
     """
-    transaction_id, error = validate_transaction_id(request.headers)
+    request_id, error = validate_request_id(request.headers)
     if error:
         return error
 
@@ -490,17 +494,17 @@ def policy_inquiry_callback():
         policies = client.get('policies', [])
 
         logger.info(
-            f"Received policy inquiry response - Transaction ID: {transaction_id}")
+            f"Received policy inquiry response - Transaction ID: {request_id}")
         logger.info(f"Client: {client.get('clientName')}")
         logger.info(f"Number of policies: {len(policies)}")
 
         # Get existing tracking record
-        record = get_tracking_record(transaction_id)
+        record = get_tracking_record(request_id)
 
         if record:
             # Update status to MANIFEST_RECEIVED
             update_tracking_status(
-                transaction_id,
+                request_id,
                 record["sk"],
                 "MANIFEST_RECEIVED",
                 "Policy inquiry response received from delivering broker"
@@ -509,19 +513,19 @@ def policy_inquiry_callback():
             # Store response details
             update_item(
                 REQUEST_TRACKING_TABLE,
-                transaction_id,
+                request_id,
                 record["sk"],
                 updates={
                     "policyInquiryResponse": data,
                     "ssnLast4": client.get("ssnLast4"),
                 }
             )
-            logger.info(f"Updated tracking record {transaction_id} to MANIFEST_RECEIVED")
+            logger.info(f"Updated tracking record {request_id} to MANIFEST_RECEIVED")
         else:
-            logger.warning(f"Tracking record {transaction_id} not found, creating new")
+            logger.warning(f"Tracking record {request_id} not found, creating new")
             # Create new record if not found
             new_record = create_tracking_record(
-                transaction_id=transaction_id,
+                request_id=request_id,
                 initial_status="MANIFEST_RECEIVED",
                 client_name=client.get('clientName'),
                 ssn_last4=client.get('ssnLast4'),
@@ -534,7 +538,7 @@ def policy_inquiry_callback():
         return create_response(
             "RECEIVED",
             "Policy inquiry response received and forwarded to requesting broker",
-            transaction_id
+            request_id
         )
 
     except Exception as e:
@@ -555,7 +559,7 @@ def bd_change():
 
     Unified API endpoint - replaces /receive-bd-change-request
     """
-    transaction_id, error = validate_transaction_id(request.headers)
+    request_id, error = validate_request_id(request.headers)
     if error:
         return error
 
@@ -569,7 +573,7 @@ def bd_change():
             )
 
         # Validate required fields
-        required_fields = ['transaction-id', 'receiving-broker-id', 'delivering-broker-id',
+        required_fields = ['request-id', 'receiving-broker-id', 'delivering-broker-id',
                            'carrier-id', 'policy-id']
         missing_fields = [field for field in required_fields if field not in data]
         if missing_fields:
@@ -579,19 +583,19 @@ def bd_change():
                 400
             )
 
-        logger.info(f"Received BD change request - Transaction ID: {transaction_id}")
+        logger.info(f"Received BD change request - Transaction ID: {request_id}")
         logger.info(f"Policy ID: {data.get('policy-id')}")
         logger.info(f"Receiving Broker: {data.get('receiving-broker-id')}")
         logger.info(f"Delivering Broker: {data.get('delivering-broker-id')}")
         logger.info(f"Carrier: {data.get('carrier-id')}")
 
         # Get existing tracking record
-        record = get_tracking_record(transaction_id)
+        record = get_tracking_record(request_id)
 
         if record:
             # First update to DUE_DILIGENCE_COMPLETE
             update_tracking_status(
-                transaction_id,
+                request_id,
                 record["sk"],
                 "DUE_DILIGENCE_COMPLETE",
                 "Due diligence checks completed"
@@ -599,7 +603,7 @@ def bd_change():
 
             # Then update to CARRIER_VALIDATION_PENDING
             update_tracking_status(
-                transaction_id,
+                request_id,
                 record["sk"],
                 "CARRIER_VALIDATION_PENDING",
                 "BD change request sent to carrier for validation"
@@ -608,7 +612,7 @@ def bd_change():
             # Update broker and carrier info
             update_item(
                 REQUEST_TRACKING_TABLE,
-                transaction_id,
+                request_id,
                 record["sk"],
                 updates={
                     "receivingBrokerId": data.get('receiving-broker-id'),
@@ -617,14 +621,14 @@ def bd_change():
                 }
             )
             logger.info(
-                f"Updated tracking record {transaction_id} to CARRIER_VALIDATION_PENDING")
+                f"Updated tracking record {request_id} to CARRIER_VALIDATION_PENDING")
         else:
-            logger.warning(f"Tracking record {transaction_id} not found")
+            logger.warning(f"Tracking record {request_id} not found")
 
         return create_response(
             "RECEIVED",
             "BD change request received and routed to carrier for validation",
-            transaction_id
+            request_id
         )
 
     except Exception as e:
@@ -645,7 +649,7 @@ def bd_change_callback():
 
     Unified API endpoint - replaces /receive-carrier-response
     """
-    transaction_id, error = validate_transaction_id(request.headers)
+    request_id, error = validate_request_id(request.headers)
     if error:
         return error
 
@@ -659,7 +663,7 @@ def bd_change_callback():
             )
 
         # Validate required fields
-        required_fields = ['transaction-id', 'carrier-id',
+        required_fields = ['request-id', 'carrier-id',
                            'policy-id', 'validation-result']
         missing_fields = [field for field in required_fields if field not in data]
         if missing_fields:
@@ -677,7 +681,7 @@ def bd_change_callback():
                 400
             )
 
-        logger.info(f"Received carrier response - Transaction ID: {transaction_id}")
+        logger.info(f"Received carrier response - Transaction ID: {request_id}")
         logger.info(f"Carrier: {data.get('carrier-id')}")
         logger.info(f"Policy ID: {data.get('policy-id')}")
         logger.info(f"Validation Result: {validation_result}")
@@ -688,7 +692,7 @@ def bd_change_callback():
             logger.info(f"Rejection Reason: {rejection_reason}")
 
         # Get existing tracking record
-        record = get_tracking_record(transaction_id)
+        record = get_tracking_record(request_id)
 
         if record:
             new_status = "CARRIER_APPROVED" if validation_result == "approved" else "CARRIER_REJECTED"
@@ -697,7 +701,7 @@ def bd_change_callback():
                 notes += f": {rejection_reason}"
 
             update_tracking_status(
-                transaction_id,
+                request_id,
                 record["sk"],
                 new_status,
                 notes
@@ -707,18 +711,18 @@ def bd_change_callback():
             if rejection_reason:
                 update_item(
                     REQUEST_TRACKING_TABLE,
-                    transaction_id,
+                    request_id,
                     record["sk"],
                     updates={"rejectionReason": rejection_reason}
                 )
 
-            logger.info(f"Updated tracking record {transaction_id} to {new_status}")
+            logger.info(f"Updated tracking record {request_id} to {new_status}")
 
         status_message = "approved" if validation_result == "approved" else "rejected"
         return create_response(
             "RECEIVED",
             f"Carrier validation response received - {status_message}",
-            transaction_id
+            request_id
         )
 
     except Exception as e:
@@ -739,7 +743,7 @@ def transfer_notification():
 
     Unified API endpoint.
     """
-    transaction_id, error = validate_transaction_id(request.headers)
+    request_id, error = validate_request_id(request.headers)
     if error:
         return error
 
@@ -772,7 +776,7 @@ def transfer_notification():
                 400
             )
 
-        logger.info(f"Received transfer notification - Transaction ID: {transaction_id}")
+        logger.info(f"Received transfer notification - Transaction ID: {request_id}")
         logger.info(f"Notification Type: {notification_type}")
         logger.info(f"Policy Number: {data.get('policyNumber')}")
 
@@ -787,21 +791,21 @@ def transfer_notification():
         new_status = notification_to_status.get(notification_type, "TRANSFER_PROCESSING")
 
         # Get existing tracking record
-        record = get_tracking_record(transaction_id)
+        record = get_tracking_record(request_id)
 
         if record:
             update_tracking_status(
-                transaction_id,
+                request_id,
                 record["sk"],
                 new_status,
                 f"Transfer notification received: {notification_type}"
             )
-            logger.info(f"Updated tracking record {transaction_id} to {new_status}")
+            logger.info(f"Updated tracking record {request_id} to {new_status}")
 
         return create_response(
             "RECEIVED",
             f"Transfer notification '{notification_type}' received successfully",
-            transaction_id
+            request_id
         )
 
     except Exception as e:
@@ -822,7 +826,7 @@ def transfer_confirmation():
 
     Unified API endpoint - replaces /receive-transfer-confirmation
     """
-    transaction_id, error = validate_transaction_id(request.headers)
+    request_id, error = validate_request_id(request.headers)
     if error:
         return error
 
@@ -853,33 +857,33 @@ def transfer_confirmation():
                 400
             )
 
-        logger.info(f"Received transfer confirmation - Transaction ID: {transaction_id}")
+        logger.info(f"Received transfer confirmation - Transaction ID: {request_id}")
         logger.info(f"Delivering Broker: {data.get('deliveringBrokerId')}")
         logger.info(f"Policy Number: {data.get('policyNumber')}")
         logger.info(f"Confirmation Status: {confirmation_status}")
 
         # Get existing tracking record
-        record = get_tracking_record(transaction_id)
+        record = get_tracking_record(request_id)
 
         if record:
             if confirmation_status == "confirmed":
                 # Update to TRANSFER_CONFIRMED then COMPLETE
                 update_tracking_status(
-                    transaction_id,
+                    request_id,
                     record["sk"],
                     "TRANSFER_CONFIRMED",
                     "Transfer confirmed by delivering broker"
                 )
                 update_tracking_status(
-                    transaction_id,
+                    request_id,
                     record["sk"],
                     "COMPLETE",
                     "BD change process completed successfully"
                 )
-                logger.info(f"Updated tracking record {transaction_id} to COMPLETE")
+                logger.info(f"Updated tracking record {request_id} to COMPLETE")
             else:
                 update_tracking_status(
-                    transaction_id,
+                    request_id,
                     record["sk"],
                     "TRANSFER_PROCESSING",
                     f"Transfer confirmation failed: {data.get('failure-reason', 'Unknown')}"
@@ -888,7 +892,7 @@ def transfer_confirmation():
         return create_response(
             "RECEIVED",
             f"Transfer confirmation received - {confirmation_status}",
-            transaction_id
+            request_id
         )
 
     except Exception as e:
@@ -907,13 +911,11 @@ def query_status(requestId):
     Retrieve current status and history for a specific transaction from request-tracking table.
     """
     try:
-        # Validate UUID format
-        try:
-            uuid.UUID(requestId)
-        except ValueError:
+        # Validate ULID format (per spec v0.1.1)
+        if not _ULID_PATTERN.match(requestId):
             return create_error_response(
                 "INVALID_REQUEST_ID",
-                "Request ID must be a valid UUID",
+                "Request ID must be a valid ULID (26 characters, Crockford Base32)",
                 400
             )
 
@@ -931,7 +933,7 @@ def query_status(requestId):
 
         # Format response
         status_data = {
-            "requestId": record.get("transactionId"),
+            "requestId": record.get("requestId"),
             "currentStatus": record.get("currentStatus"),
             "createdAt": record.get("createdAt"),
             "updatedAt": record.get("updatedAt"),

@@ -115,7 +115,7 @@ onMounted(() => {
       <div class="col-span-12 lg:col-span-4">
         <PolicyList
           :policies="policies"
-          :selected-id="selectedPolicy?.transactionId"
+          :selected-id="selectedPolicy?.requestId"
           @select="handleSelectPolicy"
         />
       </div>

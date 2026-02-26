@@ -3,7 +3,7 @@
 Migrate DynamoDB field names to match unified spec v0.1.1.
 
 Field renames:
-- transactionId → requestId
+- requestId → requestId
 - trailingCommission → hasTrailingCommission
 - systematicWithdrawal → hasSystematicWithdrawal
 - withdrawalStructure.systematicInPlace → withdrawalStructure.hasSystematicWithdrawal
@@ -35,7 +35,7 @@ TABLES = [
 
 # Field rename mappings
 FIELD_RENAMES = {
-    'transactionId': 'requestId',
+    'requestId': 'requestId',
     'trailingCommission': 'hasTrailingCommission',
     'systematicWithdrawal': 'hasSystematicWithdrawal',
     'commissionTrails': 'hasTrailingCommission',  # alias used in some tables
@@ -84,11 +84,11 @@ def rename_fields(item):
                     parent[new_name] = parent.pop(old_name)
                     updated = True
 
-    # Handle statusHistory array - rename transactionId in each entry
+    # Handle statusHistory array - rename requestId in each entry
     if 'statusHistory' in new_item and isinstance(new_item['statusHistory'], list):
         for entry in new_item['statusHistory']:
-            if isinstance(entry, dict) and 'transactionId' in entry and 'requestId' not in entry:
-                entry['requestId'] = entry.pop('transactionId')
+            if isinstance(entry, dict) and 'requestId' in entry and 'requestId' not in entry:
+                entry['requestId'] = entry.pop('requestId')
                 updated = True
 
     return new_item, updated

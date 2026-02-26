@@ -89,7 +89,7 @@ def generate_sample_records(count: int = 15) -> list:
         # Generate UUIDs for pk and sk
         pk = str(uuid.uuid4())
         sk = str(uuid.uuid4())
-        transaction_id = pk  # Use pk as transaction ID for simplicity
+        request_id = pk  # Use pk as transaction ID for simplicity
 
         # Select random entities
         carrier = random.choice(CARRIERS)
@@ -129,7 +129,7 @@ def generate_sample_records(count: int = 15) -> list:
         record = {
             "pk": pk,
             "sk": sk,
-            "transactionId": transaction_id,
+            "requestId": request_id,
             "currentStatus": current_status,
             "createdAt": created_at,
             "updatedAt": updated_at,
@@ -211,7 +211,7 @@ def main():
     print("\nSample record structure:")
     print("-" * 40)
     sample = records[0]
-    for key in ["pk", "sk", "transactionId", "currentStatus", "carrierId", "clientName"]:
+    for key in ["pk", "sk", "requestId", "currentStatus", "carrierId", "clientName"]:
         print(f"  {key}: {sample.get(key)}")
     print(f"  policiesAffected: {sample.get('policiesAffected')}")
     print(f"  statusHistory: [{len(sample.get('statusHistory', []))} entries]")
@@ -226,7 +226,7 @@ def main():
     # Print transaction IDs for testing
     print("\nTransaction IDs for testing query-status endpoint:")
     for i, record in enumerate(records[:5]):
-        print(f"  {i + 1}. {record['transactionId']} ({record['currentStatus']})")
+        print(f"  {i + 1}. {record['requestId']} ({record['currentStatus']})")
 
 
 if __name__ == "__main__":

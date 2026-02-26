@@ -47,7 +47,7 @@ All entities now implement these endpoints:
 | `POST /receive-carrier-response` | Receive carrier validation responses |
 | `POST /receive-transfer-notification` | Receive transfer notifications |
 | `POST /receive-transfer-confirmation` | Receive transfer confirmations |
-| `GET /query-status/{transactionId}` | Query transaction status |
+| `GET /query-status/{requestId}` | Query transaction status |
 
 ## Style Guide Compliance Assessment
 
@@ -145,7 +145,7 @@ CapabilityResponse:
 # Broker can call carrier directly when policy mapping is known
 POST https://api.pacificlife.com/v1/submit-policy-inquiry-request
 Headers:
-  transactionId: 123e4567-e89b-12d3-a456-426614174000
+  requestId: 123e4567-e89b-12d3-a456-426614174000
   correlationId: REQ-2024-001
 ```
 
@@ -154,7 +154,7 @@ Headers:
 # If carrier responds with NOT_CAPABLE, broker can fallback to clearinghouse
 POST https://api.clearinghouse.com/v1/submit-policy-inquiry-request
 Headers:
-  transactionId: 123e4567-e89b-12d3-a456-426614174000
+  requestId: 123e4567-e89b-12d3-a456-426614174000
 ```
 
 ## File Status

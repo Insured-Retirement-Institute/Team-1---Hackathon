@@ -48,7 +48,7 @@ def main():
     pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
     print(f"Base64 length: {len(pdf_base64):,} characters")
 
-    transaction_id = str(uuid.uuid4())
+    request_id = str(uuid.uuid4())
     request_id = str(uuid.uuid4())
 
     payload = {
@@ -58,7 +58,7 @@ def main():
 
     endpoint = f"{args.url.rstrip('/')}/extract"
     print(f"\nPOSTing to: {endpoint}")
-    print(f"  transactionId: {transaction_id}")
+    print(f"  requestId: {request_id}")
     print(f"  requestId:     {request_id}")
     print("\nCalling Bedrock... (may take 10-30 seconds)\n")
 
@@ -68,7 +68,7 @@ def main():
         data=body,
         headers={
             "Content-Type": "application/json",
-            "transactionId": transaction_id,
+            "requestId": request_id,
         },
         method="POST",
     )

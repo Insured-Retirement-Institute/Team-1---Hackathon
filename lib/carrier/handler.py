@@ -45,7 +45,7 @@ def create_response(status_code: int, body: dict, headers: dict = None) -> dict:
     default_headers = {
         "Content-Type": "application/json",
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,transactionId",
+        "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,requestId",
         "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS"
     }
     if headers:
@@ -216,12 +216,12 @@ def handle_submit_policy_inquiry_request(event: dict) -> dict:
     """
     # Get transaction ID from header
     headers = event.get("headers") or {}
-    transaction_id = headers.get("transactionId") or headers.get("transactionid")
+    request_id = headers.get("requestId") or headers.get("requestid")
 
-    if not transaction_id:
+    if not request_id:
         return create_response(400, {
             "code": "VALIDATION_ERROR",
-            "message": "transactionId header is required"
+            "message": "requestId header is required"
         })
 
     try:
@@ -282,7 +282,7 @@ def handle_submit_policy_inquiry_request(event: dict) -> dict:
     return create_response(200, {
         "code": "IMMEDIATE",
         "message": "Policy inquiry processed successfully",
-        "transactionId": transaction_id,
+        "requestId": request_id,
         "payload": policy_inquiry_response,
         "processingMode": "immediate"
     })
@@ -295,12 +295,12 @@ def handle_submit_policy_inquiry_response(event: dict) -> dict:
     Used for deferred processing responses.
     """
     headers = event.get("headers") or {}
-    transaction_id = headers.get("transactionId") or headers.get("transactionid")
+    request_id = headers.get("requestId") or headers.get("requestid")
 
-    if not transaction_id:
+    if not request_id:
         return create_response(400, {
             "code": "VALIDATION_ERROR",
-            "message": "transactionId header is required"
+            "message": "requestId header is required"
         })
 
     try:
@@ -324,7 +324,7 @@ def handle_submit_policy_inquiry_response(event: dict) -> dict:
     return create_response(200, {
         "code": "RECEIVED",
         "message": "Policy inquiry response submitted successfully",
-        "transactionId": transaction_id,
+        "requestId": request_id,
         "processingMode": "immediate"
     })
 
@@ -345,12 +345,12 @@ def handle_receive_bd_change_request(event: dict) -> dict:
 
     # Get transaction ID from header
     headers = event.get("headers") or {}
-    transaction_id = headers.get("transactionId") or headers.get("transactionid")
+    request_id = headers.get("requestId") or headers.get("requestid")
 
-    if not transaction_id:
+    if not request_id:
         return create_response(400, {
             "code": "VALIDATION_ERROR",
-            "message": "transactionId header is required"
+            "message": "requestId header is required"
         })
 
     # Validate required fields per spec
@@ -367,7 +367,7 @@ def handle_receive_bd_change_request(event: dict) -> dict:
     return create_response(200, {
         "code": "RECEIVED",
         "message": "BD change request received successfully",
-        "transactionId": transaction_id,
+        "requestId": request_id,
         "processingMode": "deferred"
     })
 
@@ -388,12 +388,12 @@ def handle_receive_transfer_notification(event: dict) -> dict:
 
     # Get transaction ID from header
     headers = event.get("headers") or {}
-    transaction_id = headers.get("transactionId") or headers.get("transactionid")
+    request_id = headers.get("requestId") or headers.get("requestid")
 
-    if not transaction_id:
+    if not request_id:
         return create_response(400, {
             "code": "VALIDATION_ERROR",
-            "message": "transactionId header is required"
+            "message": "requestId header is required"
         })
 
     # Validate required fields per spec
@@ -410,24 +410,24 @@ def handle_receive_transfer_notification(event: dict) -> dict:
     return create_response(200, {
         "code": "RECEIVED",
         "message": "Transfer notification received successfully",
-        "transactionId": transaction_id,
+        "requestId": request_id,
         "processingMode": "immediate"
     })
 
 
 def handle_query_status(event: dict) -> dict:
     """
-    GET /query-status/{transactionId}
+    GET /query-status/{requestId}
     Query transaction status.
     Per Insurance Carrier API spec.
     """
     path_params = event.get("pathParameters") or {}
-    transaction_id = path_params.get("transactionId")
+    request_id = path_params.get("requestId")
 
-    if not transaction_id:
+    if not request_id:
         return create_response(400, {
             "code": "VALIDATION_ERROR",
-            "message": "transactionId is required"
+            "message": "requestId is required"
         })
 
     # For demo, scan both tables to find the transaction
@@ -435,9 +435,9 @@ def handle_query_status(event: dict) -> dict:
         try:
             policies = scan_all_policies(table_name)
             for policy in policies:
-                if policy.get("transactionId") == transaction_id:
+                if policy.get("requestId") == request_id:
                     return create_response(200, {
-                        "transactionId": transaction_id,
+                        "requestId": request_id,
                         "currentStatus": policy.get("currentStatus"),
                         "statusHistory": policy.get("statusHistory", []),
                         "createdAt": policy.get("createdAt"),
@@ -450,7 +450,7 @@ def handle_query_status(event: dict) -> dict:
 
     return create_response(404, {
         "code": "NOT_FOUND",
-        "message": f"Transaction {transaction_id} not found"
+        "message": f"Transaction {request_id} not found"
     })
 
 
@@ -477,14 +477,14 @@ def handle_update_status(event: dict) -> dict:
         })
 
     new_status = body.get("status")
-    transaction_id = body.get("transactionId")
+    request_id = body.get("requestId")
     notes = body.get("notes")
     carrier = body.get("carrier", "carrier")
 
-    if not new_status or not transaction_id:
+    if not new_status or not request_id:
         return create_response(400, {
             "code": "VALIDATION_ERROR",
-            "message": "status and transactionId are required"
+            "message": "status and requestId are required"
         })
 
     table_name = CARRIER_TABLES.get(carrier.lower(), "carrier")
@@ -493,7 +493,7 @@ def handle_update_status(event: dict) -> dict:
         result = update_policy_status(
             table_name,
             policy_number,
-            transaction_id,
+            request_id,
             new_status,
             notes
         )
@@ -560,7 +560,7 @@ if __name__ == "__main__":
     test_event = {
         "httpMethod": "POST",
         "path": "/submit-policy-inquiry-request",
-        "headers": {"transactionId": "test-123"},
+        "headers": {"requestId": "test-123"},
         "body": json.dumps({
             "requestingFirm": {
                 "firmName": "Test Firm",

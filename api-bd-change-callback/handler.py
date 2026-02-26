@@ -28,7 +28,7 @@ Body (ServicingAgentChangeResponse schema v0.1.1):
 
 Response
 --------
-200  { code: "RECEIVED", transactionId, message }
+200  { code: "RECEIVED", requestId, message }
 400  validation error
 500  internal error
 
@@ -72,7 +72,7 @@ def _response(status_code: int, body: dict) -> dict:
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Headers": (
                 "Content-Type,X-Amz-Date,Authorization,"
-                "X-Api-Key,X-Amz-Security-Token,transactionId,correlationId"
+                "X-Api-Key,X-Amz-Security-Token,requestId,correlationId"
             ),
             "Access-Control-Allow-Methods": "POST,OPTIONS",
         },
@@ -89,7 +89,7 @@ def _error(code: str, message: str, status_code: int = 400) -> dict:
 # ---------------------------------------------------------------------------
 
 def update_transact_record(
-    transaction_id: str,
+    request_id: str,
     callback_body: dict,
     new_status: str,
 ) -> None:
@@ -105,7 +105,7 @@ def update_transact_record(
     )
 
     table.update_item(
-        Key={"pk": transaction_id, "sk": "TRANSACTION"},
+        Key={"pk": request_id, "sk": "TRANSACTION"},
         UpdateExpression=(
             "SET #status      = :status, "
             "#updated         = :updated, "
@@ -127,8 +127,8 @@ def update_transact_record(
         },
     )
     logger.info(
-        "Transact record updated — transactionId=%s status=%s",
-        transaction_id, new_status,
+        "Transact record updated — requestId=%s status=%s",
+        request_id, new_status,
     )
 
 
@@ -136,12 +136,12 @@ def update_transact_record(
 # Step 2 – fire EventBridge event
 # ---------------------------------------------------------------------------
 
-def fire_eventbridge_event(transaction_id: str, verb: str) -> None:
+def fire_eventbridge_event(request_id: str, verb: str) -> None:
     """Publish a UI-facing TransactionUpdate event to EventBridge."""
     events = boto3.client("events", region_name=REGION)
     detail = {
         "verb": verb,
-        "transactionId": transaction_id,
+        "requestId": request_id,
         "timestamp": _now(),
     }
     events.put_events(Entries=[{
@@ -151,8 +151,8 @@ def fire_eventbridge_event(transaction_id: str, verb: str) -> None:
         "EventBusName": EVENTBRIDGE_BUS_NAME,
     }])
     logger.info(
-        "EventBridge event fired — transactionId=%s verb=%s",
-        transaction_id, verb,
+        "EventBridge event fired — requestId=%s verb=%s",
+        request_id, verb,
     )
 
 
@@ -169,8 +169,8 @@ def handler(event: dict, context) -> dict:
 
     # --- Extract and validate request ID (ULID per spec v0.1.1) ---
     headers = {k.lower(): v for k, v in (event.get("headers") or {}).items()}
-    transaction_id = headers.get("requestid")
-    if not transaction_id:
+    request_id = headers.get("requestid")
+    if not request_id:
         return _error("MISSING_HEADER", "requestId header is required")
 
     # --- Parse body ---
@@ -196,7 +196,7 @@ def handler(event: dict, context) -> dict:
 
     logger.info(
         "Servicing agent change callback received — requestId=%s policies=%d",
-        transaction_id, len(policies),
+        request_id, len(policies),
     )
 
     # --- Determine overall result for DB status and EventBridge verb ---
@@ -212,17 +212,17 @@ def handler(event: dict, context) -> dict:
         verb = "transfer_pending_appointment"
 
     try:
-        update_transact_record(transaction_id, body, new_status)
-        fire_eventbridge_event(transaction_id, verb)
+        update_transact_record(request_id, body, new_status)
+        fire_eventbridge_event(request_id, verb)
     except Exception as exc:
         logger.error(
-            "Error handling BD change callback — transactionId=%s: %s",
-            transaction_id, exc, exc_info=True,
+            "Error handling BD change callback — requestId=%s: %s",
+            request_id, exc, exc_info=True,
         )
         return _error("INTERNAL_ERROR", "An internal error occurred", 500)
 
     return _response(200, {
         "code": "RECEIVED",
         "message": f"BD change callback processed — result: {new_status}",
-        "transactionId": transaction_id,
+        "requestId": request_id,
     })

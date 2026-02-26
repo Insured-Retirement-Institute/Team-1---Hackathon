@@ -71,9 +71,9 @@ export type TransactionStatus =
 
 export interface Transaction {
   pk: string;                  // "AGENT#{npn}"
-  sk: string;                  // "TRANSACTION#{transactionId}"
+  sk: string;                  // "TRANSACTION#{requestId}"
   type: "Transaction";
-  transactionId: string;
+  requestId: string;
   clientId: string;
   clientName: string;
   contracts: string[];         // Array of policy numbers

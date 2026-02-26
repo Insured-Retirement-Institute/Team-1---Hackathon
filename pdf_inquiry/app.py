@@ -27,7 +27,7 @@ from helpers import (
     create_error_response,
     create_response,
     normalize_lambda_event,
-    validate_transaction_id,
+    validate_request_id,
 )
 
 load_dotenv(override=False)
@@ -45,7 +45,7 @@ def extract_policy():
     Extract structured policy data from a Base64-encoded PDF policy statement.
 
     Required header:
-      transactionId: <UUID>
+      requestId: <UUID>
 
     Required body (JSON):
       requestId   string   Caller-supplied request identifier
@@ -56,7 +56,7 @@ def extract_policy():
       400  VALIDATION_ERROR / MISSING_HEADER / INVALID_PAYLOAD
       500  EXTRACTION_ERROR — Bedrock call or JSON parse failure
     """
-    transaction_id, err = validate_transaction_id(request.headers)
+    request_id, err = validate_request_id(request.headers)
     if err:
         return err
 
@@ -73,7 +73,7 @@ def extract_policy():
         )
 
     request_id = data["requestId"]
-    logger.info("PDF extraction request — transactionId=%s requestId=%s", transaction_id, request_id)
+    logger.info("PDF extraction request — requestId=%s requestId=%s", request_id, request_id)
 
     try:
         result = extractor.extract_from_pdf(data["pdfBase64"], request_id)
@@ -98,7 +98,7 @@ def extract_policy():
     return create_response(
         "EXTRACTED",
         "Policy data extracted from document",
-        transaction_id,
+        request_id,
         result,
         200,
         processing_mode="immediate",

@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { FwbButton } from 'flowbite-vue'
 import { useEventSource } from '@/utils/useEventSource'
+import { ulid } from 'ulid'
 
 interface EventEntry {
 	id: string
@@ -37,7 +38,7 @@ function clearEvents() {
 
 const unsubscribe = serverEventBus.on((event) => {
 	events.value.unshift({
-		id: crypto.randomUUID(),
+		id: ulid(),
 		timestamp: new Date(),
 		data: event
 	})

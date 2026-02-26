@@ -172,6 +172,22 @@ def _process_change_async(carrier_payload, carrier_info, policy_numbers,
         determination.get("determination"),
     )
 
+    # Always persist the result so it's retrievable via GET /reply/{requestId}
+    from datetime import datetime as _dt
+    now = _dt.utcnow().isoformat() + "Z"
+    item = {
+        "pk": f"{REPLY_PK_PREFIX}{request_id}",
+        "sk": "RESPONSE",
+        "requestId": request_id,
+        "receivedAt": now,
+        "response": json.dumps(response),
+        "carrier": carrier_info.get("carrierName", ""),
+        "determination": response.get("policies", [{}])[0].get("status", "") if response.get("policies") else "",
+        "context": response.get("context", ""),
+    }
+    put_item(REPLY_TABLE, item)
+    logger.info("Async result persisted in DynamoDB — requestId=%s", request_id)
+
     if callback_url:
         reply_url = f"{callback_url.rstrip('/')}/v1/servicing-agent-changes/reply"
         _post_callback(reply_url, response, request_id)

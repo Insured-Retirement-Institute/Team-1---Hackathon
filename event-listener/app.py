@@ -14,7 +14,7 @@ logger.setLevel(logging.INFO)
 
 # Configure via environment variables
 EVENTS_ENDPOINT_URL = os.environ.get(
-    "EVENTS_ENDPOINT_URL", "https://sv4fyqvgj3vwuwflc5olwwa4xq0hcele.lambda-url.us-east-1.on.aws/api/events")
+    "EVENTS_ENDPOINT_URL", "https://qsrsziidaou4kd6zh6qhtlo5ki0fvsqi.lambda-url.us-east-1.on.aws/v1/events")
 REQUEST_TIMEOUT_SECONDS = int(os.environ.get("REQUEST_TIMEOUT_SECONDS", "10"))
 
 

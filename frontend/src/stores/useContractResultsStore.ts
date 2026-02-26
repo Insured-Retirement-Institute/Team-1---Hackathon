@@ -293,7 +293,7 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 			}
 
 			const response = await brokerDealerApi.triggerPolicyInquiry(request)
-			console.log(response.requestId)
+			console.log(response)
 
 			if (isClientResponse(response.payload?.client) && response.payload?.client.policies && response.payload.client.policies.length > 0) {
 				// Map API response to ContractRecords
@@ -347,7 +347,6 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 		const policyNumbers = selectedRecords.map(r => r.contractNumber)
 
 		await new Promise(resolve => setTimeout(resolve, 3000))
-
 
 		if (autoLookup.length) {
 			try {

@@ -178,7 +178,7 @@ export interface PolicyDetails {
 
 // Manifest Response
 export interface ManifestResponse {
-	'transaction-id': string
+	'request-id': string
 	'delivering-broker-id': string
 	'response-type': ResponseType
 	policies?: PolicyDetails[]
@@ -187,7 +187,7 @@ export interface ManifestResponse {
 
 // BD Change Request
 export interface BdChangeRequest {
-	'transaction-id': string
+	'request-id': string
 	'receiving-broker-id': string
 	'delivering-broker-id': string
 	'carrier-id': string
@@ -205,7 +205,7 @@ export interface BdChangeRequest {
 
 // Carrier Response
 export interface CarrierResponse {
-	'transaction-id': string
+	'request-id': string
 	'carrier-id': string
 	'policy-id': string
 	'validation-result': ValidationResult
@@ -215,7 +215,7 @@ export interface CarrierResponse {
 
 // Transfer Confirmation (broker sends to clearinghouse)
 export interface TransferConfirmation {
-	'transaction-id': string
+	'request-id': string
 	'delivering-broker-id': string
 	'policy-id': string
 	'confirmation-status': ConfirmationStatus
@@ -224,7 +224,7 @@ export interface TransferConfirmation {
 
 // Transfer Notification (clearinghouse sends to broker)
 export interface TransferNotification {
-	'transaction-id': string
+	'request-id': string
 	'notification-type': NotificationType
 	'policy-id': string
 	'receiving-broker-id'?: string
@@ -243,7 +243,7 @@ export interface StatusHistoryItem {
 
 // Transaction status
 export interface TransactionStatus {
-	'transaction-id': string
+	'request-id': string
 	'current-status': TransactionStatusValue
 	'status-history'?: StatusHistoryItem[]
 	'created-at': string

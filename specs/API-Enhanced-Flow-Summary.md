@@ -27,7 +27,7 @@ Brokers can now call carriers directly, bypassing the clearinghouse for faster p
 ### 3. Enhanced StandardResponse Schema
 
 All APIs now use consistent `StandardResponse` with:
-- Required `transactionId` for tracking
+- Required `requestId` for tracking
 - Optional `payload` field (present for immediate responses, null for deferred)
 - `processingMode` indicating handling type
 - `routingInformation` for direct carrier calls
@@ -50,7 +50,7 @@ Delivering Broker → Clearinghouse → Receiving Broker
 {
   "code": "RECEIVED",
   "message": "Policy inquiry request received and routed to delivering broker",
-  "transactionId": "123e4567-e89b-12d3-a456-426614174000",
+  "requestId": "123e4567-e89b-12d3-a456-426614174000",
   "payload": null,
   "processingMode": "deferred"
 }
@@ -68,7 +68,7 @@ Receiving Broker → Clearinghouse → Delivering Broker
 {
   "code": "IMMEDIATE",
   "message": "Policy inquiry processed successfully",
-  "transactionId": "123e4567-e89b-12d3-a456-426614174000",
+  "requestId": "123e4567-e89b-12d3-a456-426614174000",
   "payload": {
     "requestingFirm": { ... },
     "producerValidation": { ... },
@@ -110,7 +110,7 @@ Receiving Broker → Carrier (Direct)
 ```bash
 POST https://api.pacificlife.com/v1/submit-policy-inquiry-request
 Headers:
-  transactionId: 123e4567-e89b-12d3-a456-426614174000
+  requestId: 123e4567-e89b-12d3-a456-426614174000
   Content-Type: application/json
 Body: {
   "requestingFirm": {
@@ -134,7 +134,7 @@ Body: {
 {
   "code": "IMMEDIATE",
   "message": "Policy inquiry processed successfully by carrier",
-  "transactionId": "123e4567-e89b-12d3-a456-426614174000",
+  "requestId": "123e4567-e89b-12d3-a456-426614174000",
   "payload": { /* Full PolicyInquiryResponse */ },
   "processingMode": "immediate"
 }
@@ -152,7 +152,7 @@ Receiving Broker → Clearinghouse
 {
   "code": "IMMEDIATE",
   "message": "Policy inquiry processed from cache",
-  "transactionId": "123e4567-e89b-12d3-a456-426614174000",
+  "requestId": "123e4567-e89b-12d3-a456-426614174000",
   "payload": {
     "requestingFirm": { ... },
     "producerValidation": { ... },
@@ -195,7 +195,7 @@ Receiving Broker → Carrier (Direct) → Clearinghouse → Receiving Broker
 {
   "code": "DEFERRED",
   "message": "Policy inquiry queued for processing",
-  "transactionId": "123e4567-e89b-12d3-a456-426614174000",
+  "requestId": "123e4567-e89b-12d3-a456-426614174000",
   "payload": null,
   "processingMode": "deferred",
   "estimatedResponseTime": "PT10M"
@@ -250,7 +250,7 @@ POL123456 → 68241 → https://api.pacificlife.com/v1/
 {
   "code": "VALIDATION_ERROR",
   "message": "Policy number not found",
-  "transactionId": "123e4567-e89b-12d3-a456-426614174000",
+  "requestId": "123e4567-e89b-12d3-a456-426614174000",
   "payload": null,
   "processingMode": "immediate"
 }
@@ -283,7 +283,7 @@ def handle_response(response):
     if response.processing_mode == "immediate":
         return process_payload_immediately(response.payload)
     elif response.processing_mode == "deferred":
-        return track_transaction_for_async_completion(response.transaction_id)
+        return track_transaction_for_async_completion(response.request_id)
     elif response.processing_mode == "routed":
         return monitor_routing_to_target(response.routing_information)
 ```

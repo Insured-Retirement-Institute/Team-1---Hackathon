@@ -8,11 +8,15 @@ from flask import request, jsonify, Blueprint
 from datetime import datetime, timezone, date
 import sys
 import uuid
+import re
 import base64
 import json
 import io
 import os
 import logging
+
+# ULID validation: 26 chars using Crockford's Base32 (excludes I, L, O, U)
+_ULID_PATTERN = re.compile(r'^[0-9A-HJKMNP-TV-Z]{26}$', re.IGNORECASE)
 from urllib.request import urlopen, Request as URLRequest
 from urllib.parse import quote
 from urllib.error import HTTPError, URLError
@@ -26,7 +30,7 @@ sys.path.insert(0, "../")
 sys.path.insert(0, "../../")
 from helpers import (create_response,
                      create_error_response,
-                     validate_transaction_id)
+                     validate_request_id)
 from lib.utils.dynamodb_utils import get_item, put_item, update_item, scan_items, Attr
 
 BP = Blueprint('broker-dealer', __name__)
@@ -58,7 +62,7 @@ def get_timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def find_transaction_by_id(transaction_id: str, table_name: str = None):
+def find_transaction_by_id(request_id: str, table_name: str = None):
     """
     Find a transaction by ID across distributor tables.
     Returns (record, table_name) or (None, None).
@@ -69,7 +73,7 @@ def find_transaction_by_id(transaction_id: str, table_name: str = None):
         try:
             items = scan_items(
                 table,
-                Attr("transaction-id").eq(transaction_id)
+                Attr("request-id").eq(request_id)
             )
             if items:
                 return items[0], table
@@ -80,7 +84,7 @@ def find_transaction_by_id(transaction_id: str, table_name: str = None):
 
 
 def create_transaction_record(
-    transaction_id: str,
+    request_id: str,
     npn: str,
     broker_id: str,
     broker_role: str,
@@ -96,8 +100,8 @@ def create_transaction_record(
 
     record = {
         "pk": f"NPN#{npn}",
-        "sk": f"TRANSACTION#{transaction_id}",
-        "transaction-id": transaction_id,
+        "sk": f"TRANSACTION#{request_id}",
+        "request-id": request_id,
         "policy-id": policy_id,
         "carrier-id": carrier_id,
         "broker-id": broker_id,
@@ -177,7 +181,7 @@ def policy_inquiry():
 
     Unified API endpoint - replaces /submit-policy-inquiry-request
     """
-    transaction_id, error = validate_transaction_id(request.headers)
+    request_id, error = validate_request_id(request.headers)
     if error:
         return error
 
@@ -202,7 +206,7 @@ def policy_inquiry():
         client = data.get('client', {})
         servicing_agent = requesting_firm.get('servicingAgent', {})
 
-        logger.info(f"Received policy inquiry request - Transaction ID: {transaction_id}")
+        logger.info(f"Received policy inquiry request - Transaction ID: {request_id}")
         logger.info(f"Requesting Firm: {requesting_firm.get('firmName')}")
         logger.info(f"Client: {client.get('clientName')}")
 
@@ -225,7 +229,7 @@ def policy_inquiry():
             carrier_id = "unknown"
 
         record = create_transaction_record(
-            transaction_id=transaction_id,
+            request_id=request_id,
             npn=npn,
             broker_id=broker_id,
             broker_role="delivering",
@@ -258,12 +262,12 @@ def policy_inquiry():
         }
 
         put_item(table_name, record)
-        logger.info(f"Stored transaction {transaction_id} in {table_name}")
+        logger.info(f"Stored transaction {request_id} in {table_name}")
 
         return create_response(
             "RECEIVED",
             "Policy inquiry request received and stored",
-            transaction_id,
+            request_id,
             processing_mode="deferred"
         )
 
@@ -285,7 +289,7 @@ def policy_inquiry_callback():
 
     Unified API endpoint - replaces /receive-policy-inquiry-response
     """
-    transaction_id, error = validate_transaction_id(request.headers)
+    request_id, error = validate_request_id(request.headers)
     if error:
         return error
 
@@ -309,11 +313,11 @@ def policy_inquiry_callback():
             )
 
         logger.info(
-            f"Received policy inquiry response - Transaction ID: {transaction_id}")
+            f"Received policy inquiry response - Transaction ID: {request_id}")
         logger.info(f"Client: {data.get('client', {}).get('clientName')}")
 
         # Find and update existing transaction
-        record, table_name = find_transaction_by_id(transaction_id)
+        record, table_name = find_transaction_by_id(request_id)
 
         if record:
             update_transaction_status(
@@ -323,15 +327,15 @@ def policy_inquiry_callback():
                 "MANIFEST_RECEIVED",
                 "Policy inquiry response received from clearinghouse"
             )
-            logger.info(f"Updated transaction {transaction_id} to MANIFEST_RECEIVED")
+            logger.info(f"Updated transaction {request_id} to MANIFEST_RECEIVED")
         else:
             logger.warning(
-                f"Transaction {transaction_id} not found in distributor tables")
+                f"Transaction {request_id} not found in distributor tables")
 
         return create_response(
             "RECEIVED",
             "Policy inquiry response received successfully",
-            transaction_id
+            request_id
         )
 
     except Exception as e:
@@ -352,7 +356,7 @@ def bd_change():
 
     Unified API endpoint - replaces /receive-bd-change-request
     """
-    transaction_id, error = validate_transaction_id(request.headers)
+    request_id, error = validate_request_id(request.headers)
     if error:
         return error
 
@@ -366,7 +370,7 @@ def bd_change():
             )
 
         # Validate required fields
-        required_fields = ['transaction-id', 'receiving-broker-id', 'delivering-broker-id',
+        required_fields = ['request-id', 'receiving-broker-id', 'delivering-broker-id',
                            'carrier-id', 'policy-id']
         missing_fields = [field for field in required_fields if field not in data]
         if missing_fields:
@@ -376,13 +380,13 @@ def bd_change():
                 400
             )
 
-        logger.info(f"Received BD change request - Transaction ID: {transaction_id}")
+        logger.info(f"Received BD change request - Transaction ID: {request_id}")
         logger.info(f"Policy ID: {data.get('policy-id')}")
         logger.info(f"Receiving Broker: {data.get('receiving-broker-id')}")
         logger.info(f"Delivering Broker: {data.get('delivering-broker-id')}")
 
         # Find and update existing transaction
-        record, table_name = find_transaction_by_id(transaction_id)
+        record, table_name = find_transaction_by_id(request_id)
 
         if record:
             update_transaction_status(
@@ -392,12 +396,12 @@ def bd_change():
                 "DUE_DILIGENCE_COMPLETE",
                 "BD change request received, due diligence complete"
             )
-            logger.info(f"Updated transaction {transaction_id} to DUE_DILIGENCE_COMPLETE")
+            logger.info(f"Updated transaction {request_id} to DUE_DILIGENCE_COMPLETE")
 
         return create_response(
             "RECEIVED",
             "BD change request received successfully",
-            transaction_id
+            request_id
         )
 
     except Exception as e:
@@ -418,7 +422,7 @@ def transfer_notification():
 
     Unified API endpoint - replaces /receive-transfer-notification
     """
-    transaction_id, error = validate_transaction_id(request.headers)
+    request_id, error = validate_request_id(request.headers)
     if error:
         return error
 
@@ -451,7 +455,7 @@ def transfer_notification():
                 400
             )
 
-        logger.info(f"Received transfer notification - Transaction ID: {transaction_id}")
+        logger.info(f"Received transfer notification - Transaction ID: {request_id}")
         logger.info(f"Notification Type: {notification_type}")
         logger.info(f"Policy Number: {data.get('policyNumber')}")
 
@@ -465,7 +469,7 @@ def transfer_notification():
         new_status = notification_to_status.get(notification_type, "TRANSFER_PROCESSING")
 
         # Find and update existing transaction
-        record, table_name = find_transaction_by_id(transaction_id)
+        record, table_name = find_transaction_by_id(request_id)
 
         if record:
             # Update status
@@ -490,12 +494,12 @@ def transfer_notification():
                     }
                 }
             )
-            logger.info(f"Updated transaction {transaction_id} to {new_status}")
+            logger.info(f"Updated transaction {request_id} to {new_status}")
 
         return create_response(
             "RECEIVED",
             f"Transfer notification '{notification_type}' received successfully",
-            transaction_id
+            request_id
         )
 
     except Exception as e:
@@ -853,11 +857,11 @@ def extract_policy_from_pdf():
       INVALID_PDF      — base64 could not be decoded
       EXTRACTION_ERROR — Bedrock call or JSON parse failure
     """
-    # Accept requestId header (per unified spec) with transactionId fallback
-    request_id_header = request.headers.get("requestId") or request.headers.get("transactionId")
+    # Accept requestId header (per unified spec) with requestId fallback
+    request_id_header = request.headers.get("requestId") or request.headers.get("requestId")
     if not request_id_header:
         return create_error_response("MISSING_HEADER", "requestId header is required", 400)
-    transaction_id = request_id_header
+    request_id = request_id_header
 
     data = request.get_json(silent=True)
     if not data:
@@ -872,8 +876,8 @@ def extract_policy_from_pdf():
         )
 
     request_id = data["requestId"]
-    logger.info("PDF extraction — transactionId=%s requestId=%s",
-                transaction_id, request_id)
+    logger.info("PDF extraction — requestId=%s requestId=%s",
+                request_id, request_id)
 
     try:
         result = _extract_from_pdf(data["pdfBase64"], request_id)
@@ -902,7 +906,7 @@ def extract_policy_from_pdf():
     return create_response(
         "EXTRACTED",
         "Policy data extracted from document",
-        transaction_id,
+        request_id,
         result,
         200,
         processing_mode="immediate",
@@ -1170,11 +1174,11 @@ def generate_carrier_letter():
       CARRIER_OWN_FORM    — carrier requires its own proprietary form; letter not generated
       VALIDATION_ERROR    — missing required fields or carrier address unresolvable
     """
-    # Accept requestId header (per unified spec) with transactionId fallback
-    request_id_header = request.headers.get("requestId") or request.headers.get("transactionId")
+    # Accept requestId header (per unified spec) with requestId fallback
+    request_id_header = request.headers.get("requestId") or request.headers.get("requestId")
     if not request_id_header:
         return create_error_response("MISSING_HEADER", "requestId header is required", 400)
-    transaction_id = request_id_header
+    request_id = request_id_header
 
     data = request.get_json(silent=True)
     if not data:
@@ -1191,8 +1195,8 @@ def generate_carrier_letter():
 
     request_id = data["requestId"]
     carrier_name_req = data["carrierName"]
-    logger.info("Carrier letter generation — transactionId=%s requestId=%s carrier=%s",
-                transaction_id, request_id, carrier_name_req)
+    logger.info("Carrier letter generation — requestId=%s requestId=%s carrier=%s",
+                request_id, request_id, carrier_name_req)
 
     # Pre-flight: check if carrier requires a proprietary form (fast directory lookup, no AI).
     # This avoids burning an LLM call for carriers like Nationwide that can never use a generic letter.
@@ -1213,7 +1217,7 @@ def generate_carrier_letter():
             f"{carrier_name_req} requires the use of {form_name}. "
             "A generic letter cannot be generated for this carrier. "
             "Please obtain the carrier's proprietary form.",
-            transaction_id,
+            request_id,
             {
                 "carrierName": carrier_record["carrier_name"],
                 "ownFormName": form_name,
@@ -1317,7 +1321,7 @@ def generate_carrier_letter():
     return create_response(
         "GENERATED",
         f"Carrier letter generated for {carrier_name_req}",
-        transaction_id,
+        request_id,
         payload,
         200,
         processing_mode="immediate",
@@ -1332,7 +1336,7 @@ def bd_change_callback():
 
     Unified API endpoint.
     """
-    transaction_id, error = validate_transaction_id(request.headers)
+    request_id, error = validate_request_id(request.headers)
     if error:
         return error
 
@@ -1363,13 +1367,13 @@ def bd_change_callback():
                 400
             )
 
-        logger.info(f"Received carrier response - Transaction ID: {transaction_id}")
+        logger.info(f"Received carrier response - Transaction ID: {request_id}")
         logger.info(f"Carrier: {data.get('carrierId')}")
         logger.info(f"Policy Number: {data.get('policyNumber')}")
         logger.info(f"Validation Result: {validation_result}")
 
         # Find and update existing transaction
-        record, table_name = find_transaction_by_id(transaction_id)
+        record, table_name = find_transaction_by_id(request_id)
 
         if record:
             new_status = "CARRIER_APPROVED" if validation_result == "approved" else "CARRIER_REJECTED"
@@ -1385,12 +1389,12 @@ def bd_change_callback():
                 new_status,
                 notes
             )
-            logger.info(f"Updated transaction {transaction_id} to {new_status}")
+            logger.info(f"Updated transaction {request_id} to {new_status}")
 
         return create_response(
             "RECEIVED",
             f"Carrier validation response received - {validation_result}",
-            transaction_id
+            request_id
         )
 
     except Exception as e:
@@ -1410,7 +1414,7 @@ def transfer_confirmation():
 
     Unified API endpoint.
     """
-    transaction_id, error = validate_transaction_id(request.headers)
+    request_id, error = validate_request_id(request.headers)
     if error:
         return error
 
@@ -1441,12 +1445,12 @@ def transfer_confirmation():
                 400
             )
 
-        logger.info(f"Received transfer confirmation - Transaction ID: {transaction_id}")
+        logger.info(f"Received transfer confirmation - Transaction ID: {request_id}")
         logger.info(f"Policy Number: {data.get('policyNumber')}")
         logger.info(f"Confirmation Status: {confirmation_status}")
 
         # Find and update existing transaction
-        record, table_name = find_transaction_by_id(transaction_id)
+        record, table_name = find_transaction_by_id(request_id)
 
         if record:
             if confirmation_status == "confirmed":
@@ -1464,7 +1468,7 @@ def transfer_confirmation():
                     "COMPLETE",
                     "BD change process completed successfully"
                 )
-                logger.info(f"Updated transaction {transaction_id} to COMPLETE")
+                logger.info(f"Updated transaction {request_id} to COMPLETE")
             elif confirmation_status == "failed":
                 update_transaction_status(
                     table_name,
@@ -1477,7 +1481,7 @@ def transfer_confirmation():
         return create_response(
             "RECEIVED",
             f"Transfer confirmation received - {confirmation_status}",
-            transaction_id
+            request_id
         )
 
     except Exception as e:
@@ -1498,13 +1502,11 @@ def query_status(requestId):
     Unified API endpoint.
     """
     try:
-        # Validate UUID format
-        try:
-            uuid.UUID(requestId)
-        except ValueError:
+        # Validate ULID format (per spec v0.1.1)
+        if not _ULID_PATTERN.match(requestId):
             return create_error_response(
                 "INVALID_REQUEST_ID",
-                "Request ID must be a valid UUID",
+                "Request ID must be a valid ULID (26 characters, Crockford Base32)",
                 400
             )
 
@@ -1522,7 +1524,7 @@ def query_status(requestId):
 
         # Format response
         status_data = {
-            "requestId": record.get("transaction-id"),
+            "requestId": record.get("request-id"),
             "currentStatus": record.get("current-status"),
             "createdAt": record.get("created-at"),
             "updatedAt": record.get("updated-at"),
