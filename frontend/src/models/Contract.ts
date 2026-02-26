@@ -7,6 +7,7 @@ export interface Contract {
 	productName: string
 	planType: string
 	status: string
+	contractStatus?: string
 	cusip: string
 	issueState: string
 	hasSystematicWithdrawal: boolean
@@ -14,4 +15,5 @@ export interface Contract {
 	pk: string
 	sk: string
 	type: string
+	accountType?: string
 }

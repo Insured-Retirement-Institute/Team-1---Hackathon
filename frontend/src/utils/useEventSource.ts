@@ -28,10 +28,14 @@ const source = () => {
 const waitForEvent = <T>(matcher : (data : T) => boolean, timeout: number = 20_000) => new Promise((resolve, reject) => {
 
 	const off = serverEventBus.on(data => {
-		if (matcher(data as T)) {
+		const match = (data as unknown as T[]).find(matcher)
+
+		console.log(match)
+
+		if (match) {
 			off()
 			clearTimeout(timeoutId)
-			resolve(data)
+			resolve(match)
 		}
 	})
 

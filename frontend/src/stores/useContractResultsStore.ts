@@ -8,6 +8,8 @@ import { ulid } from 'ulid'
 import { groupBy } from 'lodash'
 import type { Client } from '@/models/Client'
 import { useClientStore } from './useClientStore'
+import { useEventSource } from '@/utils/useEventSource'
+import type { Contract } from '@/models/Contract'
 
 const CARRIER_PRODUCTS: Record<string, string> = {
 	'Allianz Life': 'Allianz 222® Annuity',
@@ -115,6 +117,7 @@ function mapApiContractStatus(apiStatus: string | null | undefined): ContractSta
 		notlicensed: ContractStatus.NotLicensed,
 		unappointed: ContractStatus.Unappointed
 	}
+
 	return mapping[apiStatus.toLowerCase().replace(/[^a-z]/g, '')] ?? ContractStatus.Inactive
 }
 
@@ -293,21 +296,29 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 			}
 
 			const response = await brokerDealerApi.triggerPolicyInquiry(request)
-			console.log(response)
 
-			if (isClientResponse(response.payload?.client) && response.payload?.client.policies && response.payload.client.policies.length > 0) {
-				// Map API response to ContractRecords
-				dtccContractResults.value = response.payload?.client.policies.map((policy) => {
-					const hasErrors = policy.errors && policy.errors.length > 0
-					const resolved = !hasErrors && !!policy.carrierName
-					return mapDetailedPolicyToContractRecord(policy, resolved)
-				})
-			} else {
-				// Fallback to fake data
-				dtccContractResults.value = searchContracts.value
-					.filter(c => c.contractNumber.trim() !== '')
-					.map((contract, index) => generateFakeDtccResult(contract, index))
-			}
+			const result = await useEventSource().waitForEvent<any>(data => data.payload.detail.requestId === response.requestId)
+
+			const policies = (result as any).payload.detail.body.payload.client.policies as Contract[]
+
+			console.log(policies)
+
+			dtccContractResults.value = policies.map(contract => ({
+				id: crypto.randomUUID(),
+				contractNumber: contract.policyNumber ?? '',
+				carrierName: contract.carrierName ?? '',
+				productName: contract.productName ?? '',
+				cusipNumber: contract.cusip ?? '',
+				ownership: contract.accountType === 'individual' ? OwnershipType.Individual : contract.accountType === 'trust' ? OwnershipType.TrustAccount : OwnershipType.EntityAccount,
+				planType: mapApiPlanType(contract.planType),
+				accountType: undefined,
+				trailing: contract.hasTrailingCommission ?? false,
+				withdrawalProgram: contract.hasSystematicWithdrawal ?? false,
+				contractStatus: mapApiContractStatus(contract.contractStatus),
+				dtccResolved: !!contract.carrierName,
+				selected: false
+			}))
+
 		} catch (error) {
 			console.warn('API call failed, using fake data:', error)
 			// Fallback to fake data on API error
