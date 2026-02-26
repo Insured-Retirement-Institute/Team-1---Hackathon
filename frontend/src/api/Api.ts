@@ -24,7 +24,7 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
 		...options,
 		headers: {
 			'Content-Type': 'application/json',
-			requestId: ulid(),
+			'requestId': ulid(),
 			blobs: ulid(),
 			...options?.headers
 		}
@@ -191,8 +191,8 @@ export const brokerDealerApi = {
 export const insuranceCarrierApi = {
 	validatePolicies: (
 		request: { policies: string[] }
-	): Promise<PolicyInquiryResponse> =>
-		fetchJson(`${INSURANCE_CARRIER_API}/validate-policies`, {
+	): Promise<StandardResponse> =>
+		fetchJson(`https://sv4fyqvgj3vwuwflc5olwwa4xq0hcele.lambda-url.us-east-1.on.aws/v1/servicing-agent-changes/create`, {
 			method: 'POST',
 			body: JSON.stringify(request)
 		}),

@@ -16,4 +16,5 @@ export interface Contract {
 	sk: string
 	type: string
 	accountType?: string
+	ownership?: string
 }

@@ -148,4 +148,5 @@ export interface ContractRecord {
 	// Extended fields not in DetailedPolicyInfo
 	ownerName?: string
 	custodialInfo?: CustodialInfo
+	effectiveDate?: string
 }

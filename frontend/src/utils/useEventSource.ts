@@ -25,7 +25,7 @@ const source = () => {
 	}
 }
 
-const waitForEvent = <T>(matcher : (data : T) => boolean, timeout: number = 20_000) => new Promise((resolve, reject) => {
+const waitForEvent = <T>(matcher : (data : T) => boolean, timeout: number = 200_000) => new Promise((resolve, reject) => {
 
 	const off = serverEventBus.on(data => {
 		const match = (data as unknown as T[]).find(matcher)

@@ -7,6 +7,7 @@ import { brokerDealerApi } from '@/api/Api'
 import { ulid } from 'ulid'
 import { useLoaderStore } from '@/stores/useLoaderStore'
 import DownloadIcon from '@/icons/DownloadIcon.svg'
+import { useContractResultsStore } from '@/stores/useContractResultsStore'
 
 const record = defineModel<ContractRecord>({ required: true })
 const loaderStore = useLoaderStore()
@@ -23,24 +24,38 @@ const props = withDefaults(defineProps<{
 
 async function downloadCarrierLetter() {
 	try {
+		const { clientSearch } = useContractResultsStore()
 		await brokerDealerApi.generateCarrierLetter({
 			requestId: ulid(),
 			carrierName: record.value.carrierName ?? '',
+			carrierDepartment: 'Annuity Operations',
+			carrierAddress: {
+				line1: '700 Newport Center Drive',
+				city: 'Newport Beach',
+				state: 'CA',
+				zip: '92660'
+			},
 			client: {
-				fullName: ''
+				name: clientSearch.clientName,
+				last4Ssn: clientSearch.ssnLast4
 			},
 			policyNumbers: [record.value.contractNumber],
 			currentAgent: {
-				name: ''
+				name: 'Test Agent',
+				npn: '234543'
 			},
 			newAgent: {
-				name: ''
+				name: 'Sarah Mitchell',
+				npn: '99887766',
+				bdName: 'IRI Brokerage Inc',
+				bdDtccId: 'BD-1001'
 			},
-			reasonForChange: 'Exchange',
-			trailingCommission: 'yes',
+			reasonForChange: 'Client-requested advisor transition',
+			trailingCommission: 'no',
 			requestingFirm: {
-				firmName: '',
-				firmId: undefined
+				name: 'Firm One',
+				contact: 'Operations Dept',
+				phone: '555-123-4567'
 			}
 		})
 	} catch (e) {

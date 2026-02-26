@@ -35,14 +35,13 @@ const router = createRouter({
 			component: () => import('@/pages/DtccResults.vue'),
 			meta: {
 				title: 'Contract Results from DTCC',
-				next: {
-					route: '/carrier-results',
-					handler: async () => {
-						const contractResultsStore = useContractResultsStore()
-						await contractResultsStore.initiateCarrierSearch()
-					}
-				},
-				nextLabel: 'Move these Contracts',
+				// next: {
+				// 	route: '/carrier-results',
+				// 	handler: async () => {
+				// 		const contractResultsStore = useContractResultsStore()
+				// 		await contractResultsStore.initiateCarrierSearch()
+				// 	}
+				// },
 				previous: {
 					route: '/initiate-exchange'
 				}

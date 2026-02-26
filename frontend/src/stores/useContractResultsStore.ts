@@ -276,8 +276,6 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 			.filter(c => c.contractNumber.trim() !== '')
 			.map(c => c.contractNumber)
 
-		await new Promise(resolve => setTimeout(resolve, 2000))
-
 		try {
 			const request: PolicyInquiryRequest = {
 				requestingFirm: {
@@ -309,7 +307,10 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 				carrierName: contract.carrierName ?? '',
 				productName: contract.productName ?? '',
 				cusipNumber: contract.cusip ?? '',
-				ownership: contract.accountType === 'individual' ? OwnershipType.Individual : contract.accountType === 'trust' ? OwnershipType.TrustAccount : OwnershipType.EntityAccount,
+				ownership: contract.ownership === 'individual' ? OwnershipType.Individual :
+					contract.ownership === 'trust' ? OwnershipType.TrustAccount :
+					contract.ownership === 'custodian' ? OwnershipType.Custodial :
+					OwnershipType.EntityAccount,
 				planType: mapApiPlanType(contract.planType),
 				accountType: undefined,
 				trailing: contract.hasTrailingCommission ?? false,
@@ -340,30 +341,88 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 		const selectedRecords = dtccContractResults.value.filter(r => r.selected)
 		const policyNumbers = selectedRecords.map(r => r.contractNumber)
 
-		await new Promise(resolve => setTimeout(resolve, 3000))
+		carrierContractResults.value = [...dtccContractResults.value]
 
 		if (autoLookup.length) {
 			try {
 				// Try API call
 				const response = await insuranceCarrierApi.validatePolicies({
-					policies: policyNumbers
+					carrier: {
+						carrierName: selectedRecords[0]?.carrierName,
+						carrierId: 'ATH1'
+					},
+					requestingFirm: {
+						firmName: 'Firms',
+						servicingAgent: {
+							agentName: 'Agent Test',
+							npn: '12345678'
+						}
+					},
+					client: {
+						clientName: clientSearch.value.clientName,
+						policyNumbers,
+					},
+
 				})
 
-				if (response.client.policies && response.client.policies.length > 0) {
-					// Map API response to ContractRecords with additional carrier info
-					carrierContractResults.value = response.client.policies.map(policy => {
-						const record = mapDetailedPolicyToContractRecord(policy, true)
-						// Try to find matching DTCC record to preserve owner name
-						const matchingDtcc = selectedRecords.find(r => r.contractNumber === policy.policyNumber)
-						if (matchingDtcc?.ownerName) {
-							record.ownerName = matchingDtcc.ownerName
+				console.log('hey', response)
+
+				await new Promise<void>((resolve) => {
+					const id = setInterval(async () => {
+						const result = await fetch(`https://sv4fyqvgj3vwuwflc5olwwa4xq0hcele.lambda-url.us-east-1.on.aws/v1/servicing-agent-changes/reply/${response.requestId}`)
+
+						if (result.ok) {
+							const data = await result.json()
+							console.log('Servicing change reply:', data)
+
+							if ((data.determination === 'approved' || data.determination === 'rejected') && data.response?.policies) {
+								// Update carrier contract results with the new statuses
+								for (const policy of data.response.policies) {
+									const contractIndex = carrierContractResults.value.findIndex(
+										c => c.contractNumber === policy.policyNumber
+									)
+									if (contractIndex !== -1) {
+										const existing = carrierContractResults.value[contractIndex]!
+										if (policy.status === 'approved') {
+											existing.contractStatus = ContractStatus.Active
+										} else if (policy.status === 'rejected') {
+											existing.contractStatus = ContractStatus.CarrierSpecific
+										} else {
+											existing.contractStatus = mapApiContractStatus(policy.status)
+										}
+										existing.effectiveDate = policy.effectiveDate ?? undefined
+										existing.errors = policy.errors
+										existing.selected = false
+									}
+								}
+								clearInterval(id)
+								resolve()
+							}
 						}
-						return record
-					})
-				} else {
-					// Fallback to fake data
-					carrierContractResults.value = selectedRecords.map(generateFakeCarrierResult)
-				}
+					}, 2_000)
+				})
+				// const result = await useEventSource().waitForEvent<any>(data => data.payload.detail.requestId === response.requestId)
+
+
+				// const policies = (result as any).payload.detail.body.payload.client.policies as Contract[]
+
+				// console.log(policies)
+
+				// if (response.client.policies && response.client.policies.length > 0) {
+				// 	// Map API response to ContractRecords with additional carrier info
+				// 	carrierContractResults.value = response.client.policies.map(policy => {
+				// 		const record = mapDetailedPolicyToContractRecord(policy, true)
+				// 		// Try to find matching DTCC record to preserve owner name
+				// 		const matchingDtcc = selectedRecords.find(r => r.contractNumber === policy.policyNumber)
+				// 		if (matchingDtcc?.ownerName) {
+				// 			record.ownerName = matchingDtcc.ownerName
+				// 		}
+				// 		return record
+				// 	})
+				// } else {
+				// 	// Fallback to fake data
+				// 	carrierContractResults.value = selectedRecords.map(generateFakeCarrierResult)
+				// }
 			} catch (error) {
 				console.warn('API call failed, using fake data:', error)
 				// Fallback to fake data on API error
