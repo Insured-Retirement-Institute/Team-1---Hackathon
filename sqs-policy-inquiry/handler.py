@@ -25,13 +25,14 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
-
 import boto3
-import urllib3
+import random
+import time
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+DELAY = bool(os.environ.get("DELAY", "false").lower() == "true")
 INTERNAL_API_BASE_URL = os.environ.get(
     "INTERNAL_API_BASE_URL",
     "https://sv4fyqvgj3vwuwflc5olwwa4xq0hcele.lambda-url.us-east-1.on.aws/v1"
@@ -134,6 +135,12 @@ def update_transact_record(request_id: str, api_response: dict) -> None:
 def fire_eventbridge_event(request_id: str, verb: str, api_response: dict) -> None:
     """Publish a RequestUpdate event to EventBridge."""
     events = boto3.client("events", region_name=REGION)
+
+    # Random delay between 1-7 seconds
+    if DELAY:
+        sleep_duration = random.randint(1, 7)
+        time.sleep(sleep_duration)
+
     detail = {
         "verb": verb,
         "requestId": request_id,

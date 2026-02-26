@@ -209,10 +209,10 @@ def lookup_policy_from_iiex(policy_number: str) -> dict:
         f"POLICY#{policy_number}"
     )
 
-    if policy:
-        # Determine carrier name from prefix
-        prefix = policy_number.split("-")[0] if "-" in policy_number else None
-        policy["_carrierName"] = CARRIER_NAME_BY_PREFIX.get(prefix, "Unknown")
+    # if policy:
+    #     # Determine carrier name from prefix
+    #     prefix = policy_number.split("-")[0] if "-" in policy_number else None
+    #     policy["_carrierName"] = CARRIER_NAME_BY_PREFIX.get(prefix, "Unknown")
     return policy
 
 
@@ -239,7 +239,7 @@ def format_iiex_policy_for_response(policy: dict, client_ssn: str = None) -> dic
 
     return {
         "policyNumber": policy.get("policyNumber"),
-        "carrierName": policy.get("_carrierName", "Unknown"),
+        "carrierName": policy.get("carrierName", "Unknown"),
         "accountType": ACCOUNT_TYPE_MAP.get(policy.get("accountType"), "individual"),
         "planType": PLAN_TYPE_MAP.get(policy.get("planType"), "nonQualified"),
         "ownership": policy.get("ownership", "single"),

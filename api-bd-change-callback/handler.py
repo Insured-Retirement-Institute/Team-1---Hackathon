@@ -43,12 +43,14 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
-
 import boto3
+import random
+import time
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+DELAY = bool(os.environ.get("DELAY", "false").lower() == "true")
 TRANSACT_TABLE = os.environ.get("TRANSACT_TABLE", "transact")
 EVENTBRIDGE_BUS_NAME = os.environ.get("EVENTBRIDGE_BUS_NAME", "hackathon-events")
 REGION = os.environ.get("AWS_REGION", "us-east-1")
@@ -136,13 +138,21 @@ def update_transact_record(
 # Step 2 – fire EventBridge event
 # ---------------------------------------------------------------------------
 
-def fire_eventbridge_event(request_id: str, verb: str) -> None:
+def fire_eventbridge_event(request_id: str, verb: str, body: dict) -> None:
     """Publish a UI-facing RequestUpdate event to EventBridge."""
+    events = boto3.client("events", region_name=REGION)
+
+    # Random delay between 1-7 seconds
+    if DELAY:
+        sleep_duration = random.randint(1, 7)
+        time.sleep(sleep_duration)
+
     events = boto3.client("events", region_name=REGION)
     detail = {
         "verb": verb,
         "requestId": request_id,
         "timestamp": _now(),
+        "body": body,
     }
     events.put_events(Entries=[{
         "Source": "hackathon.broker-dealer",
@@ -213,7 +223,7 @@ def handler(event: dict, context) -> dict:
 
     try:
         update_transact_record(request_id, body, new_status)
-        fire_eventbridge_event(request_id, verb)
+        fire_eventbridge_event(request_id, verb, body)
     except Exception as exc:
         logger.error(
             "Error handling BD change callback — requestId=%s: %s",
