@@ -35,13 +35,13 @@ const router = createRouter({
 			component: () => import('@/pages/DtccResults.vue'),
 			meta: {
 				title: 'Contract Results from DTCC',
-				// next: {
-				// 	route: '/carrier-results',
-				// 	handler: async () => {
-				// 		const contractResultsStore = useContractResultsStore()
-				// 		await contractResultsStore.initiateCarrierSearch()
-				// 	}
-				// },
+				next: {
+					route: '/carrier-results',
+					handler: async () => {
+						const contractResultsStore = useContractResultsStore()
+						await contractResultsStore.initiateCarrierSearch()
+					}
+				},
 				previous: {
 					route: '/initiate-exchange'
 				}
@@ -55,29 +55,29 @@ const router = createRouter({
 				previous: {
 					route: '/dtcc-results'
 				},
-				nextLabel: 'Submit Transfer',
-				next: {
-					route: '/',
-					handler: async () => {
-						const loaderStore = useLoaderStore()
-						try {
-							const { clientSearch, carrierContractResults } = useContractResultsStore()
+				// nextLabel: 'Submit Transfer',
+				// next: {
+				// 	route: '/',
+				// 	handler: async () => {
+				// 		const loaderStore = useLoaderStore()
+				// 		try {
+				// 			const { clientSearch, carrierContractResults } = useContractResultsStore()
 
-							loaderStore.open('Submitting Transfer')
+				// 			loaderStore.open('Submitting Transfer')
 
-							const result = await distributorApi.createRequest('12345678', {
-								clientId: clientSearch.clientId,
-								contracts: carrierContractResults.filter(r => r.dtccResolved).map(r => r.contractNumber),
-								receivingBrokerId: 'BD002',
-							})
+				// 			const result = await distributorApi.createRequest('12345678', {
+				// 				clientId: clientSearch.clientId,
+				// 				contracts: carrierContractResults.filter(r => r.dtccResolved).map(r => r.contractNumber),
+				// 				receivingBrokerId: 'BD002',
+				// 			})
 
-						} catch(e) {
-							console.error(e)
-						} finally {
-							loaderStore.close()
-						}
-					}
-				},
+				// 		} catch(e) {
+				// 			console.error(e)
+				// 		} finally {
+				// 			loaderStore.close()
+				// 		}
+				// 	}
+				// },
 			}
 		},
 		{
