@@ -1,16 +1,53 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { FwbInput, FwbSelect, FwbCheckbox } from 'flowbite-vue'
+import { FwbInput, FwbSelect, FwbCheckbox, FwbButton } from 'flowbite-vue'
 import { PlanType, AccountType, OwnershipType, type ContractRecord } from '@/models/ContractRecord'
 import CustodialInfoCard from '@/components/CustodialInfoCard.vue'
+import { brokerDealerApi } from '@/api/Api'
+import { ulid } from 'ulid'
+import { useLoaderStore } from '@/stores/useLoaderStore'
+import DownloadIcon from '@/icons/DownloadIcon.svg'
 
 const record = defineModel<ContractRecord>({ required: true })
+const loaderStore = useLoaderStore()
 
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
 	displayContractData?: boolean
+	showCheckbox?: boolean
+	showDownloadCarrierLetter?: boolean
 }>(), {
-	displayContractData: true
+	displayContractData: true,
+	showCheckbox: true,
+	showDownloadCarrierLetter: false
 })
+
+async function downloadCarrierLetter() {
+	try {
+		await brokerDealerApi.generateCarrierLetter({
+			requestId: ulid(),
+			carrierName: record.value.carrierName ?? '',
+			client: {
+				fullName: ''
+			},
+			policyNumbers: [record.value.contractNumber],
+			currentAgent: {
+				name: ''
+			},
+			newAgent: {
+				name: ''
+			},
+			reasonForChange: 'Exchange',
+			trailingCommission: 'yes',
+			requestingFirm: {
+				firmName: '',
+				firmId: undefined
+			}
+		})
+	} catch (e) {
+		console.error(e)
+	} finally {
+	}
+}
 
 // Initialize custodialInfo if not present
 if (!record.value.custodialInfo) {
@@ -53,10 +90,16 @@ const ownershipOptions = [
 	>
 		<div class="flex items-center justify-between mb-4">
 			<div class="flex items-center gap-2">
-				<FwbCheckbox v-model="record.selected" />
+				<FwbCheckbox v-if="props.showCheckbox" v-model="record.selected" />
 
 				<p class="text-gray-900 text-lg font-bold">Contract {{ record.contractNumber }}</p>
 			</div>
+			<FwbButton v-if="props.showDownloadCarrierLetter" color="light" @click="downloadCarrierLetter" class="cursor-pointer">
+				Download Carrier Letter
+				<template #prefix>
+					<DownloadIcon />
+				</template>
+			</FwbButton>
 		</div>
 
 		<!-- Contract Data Section -->

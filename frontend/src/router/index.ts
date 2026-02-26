@@ -56,6 +56,7 @@ const router = createRouter({
 				previous: {
 					route: '/dtcc-results'
 				},
+				nextLabel: 'Submit Transfer',
 				next: {
 					route: '/',
 					handler: async () => {
