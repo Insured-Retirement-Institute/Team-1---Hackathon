@@ -93,11 +93,13 @@ def update_transact_record(request_id: str, api_response: dict) -> None:
         new_status = "POLICY_INQUIRY_DEFERRED"
 
     dynamodb = boto3.resource("dynamodb", region_name=REGION)
-    table = dynamodb.Table(TRANSACT_TABLE)
+    # table = dynamodb.Table(TRANSACT_TABLE)
+    table_client = boto3.client('dynamodb')
 
     now = _now()
-    table.update_item(
-        Key={"pk": request_id, "sk": "TRANSACTION"},
+    table_client.update_item(
+        TableName=TRANSACT_TABLE,
+        Key={"pk": {"S": request_id}, "sk": {"S": "TRANSACTION"}},
         UpdateExpression=(
             "SET #status   = :status, "
             "#updated      = :updated, "
@@ -105,18 +107,18 @@ def update_transact_record(request_id: str, api_response: dict) -> None:
             "#history      = list_append(if_not_exists(#history, :empty), :hist)"
         ),
         ExpressionAttributeNames={
-            "#status":      "current-status",
-            "#updated":     "updated-at",
+            "#status": "current-status",
+            "#updated": "updated-at",
             "#pi_response": "policy-inquiry-response",
-            "#history":     "status-history",
+            "#history": "status-history",
         },
         ExpressionAttributeValues={
-            ":status":   new_status,
-            ":updated":  now,
-            ":response": api_response,
-            ":empty":    [],
-            ":hist":     [{"status": new_status, "timestamp": now,
-                           "notes": "Policy inquiry API response saved"}],
+            ":status": {"S": new_status},
+            ":updated": {"S": now},
+            ":response": {"S": json.dumps(api_response)},
+            ":empty": {"L": []},
+            ":hist": {"L": [{"M": {"status": {"S": new_status}, "timestamp": {"S": now},
+                                   "notes": {"S": "Policy inquiry API response saved"}}}]},
         },
     )
     logger.info(
@@ -138,9 +140,9 @@ def fire_eventbridge_event(request_id: str, verb: str) -> None:
         "timestamp": _now(),
     }
     events.put_events(Entries=[{
-        "Source":       "hackathon.broker-dealer",
-        "DetailType":   "TransactionUpdate",
-        "Detail":       json.dumps(detail),
+        "Source": "hackathon.broker-dealer",
+        "DetailType": "TransactionUpdate",
+        "Detail": json.dumps(detail),
         "EventBusName": EVENTBRIDGE_BUS_NAME,
     }])
     logger.info(
@@ -156,7 +158,7 @@ def fire_eventbridge_event(request_id: str, verb: str) -> None:
 def process_record(record: dict) -> None:
     body = json.loads(record["body"])
     request_id = body["requestId"]
-    request_data   = body["requestData"]
+    request_data = body["requestData"]
 
     logger.info("Processing policy inquiry — requestId=%s", request_id)
 
