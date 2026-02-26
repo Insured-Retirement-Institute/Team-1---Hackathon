@@ -61,7 +61,7 @@ export interface BdChangeRequest {
   errors: PolicyError[]
 }
 
-export type TransactionStatus =
+export type RequestStatus =
   | 'MANIFEST_REQUESTED'
   | 'MANIFEST_RECEIVED'
   | 'DUE_DILIGENCE_COMPLETE'
@@ -72,6 +72,9 @@ export type TransactionStatus =
   | 'TRANSFER_PROCESSING'
   | 'TRANSFER_CONFIRMED'
   | 'COMPLETE'
+
+// Backwards compatibility alias
+export type TransactionStatus = RequestStatus
 
 export type CarrierTable = 'carrier' | 'carrier-2'
 

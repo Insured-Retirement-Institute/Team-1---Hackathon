@@ -328,7 +328,7 @@ def get_policy_by_number(
     return results[0] if results else None
 
 
-def get_policy_by_transaction(
+def get_policy_by_request(
     table_name: str,
     request_id: str,
     region: str = "us-east-1"
@@ -514,7 +514,7 @@ __all__ = [
     # Carrier / policy helpers
     "scan_all_policies",
     "get_policy_by_number",
-    "get_policy_by_transaction",
+    "get_policy_by_request",
     "query_policies_by_client",
     "query_policies_by_ssn_last4",
     "query_policies_by_status",

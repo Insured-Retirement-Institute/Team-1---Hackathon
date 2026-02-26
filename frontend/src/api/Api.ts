@@ -119,7 +119,7 @@ export const clearinghouseApi = {
 			body: JSON.stringify(confirmation)
 		}),
 
-	queryTransactionStatus: (requestId: string): Promise<TransactionStatus> =>
+	queryRequestStatus: (requestId: string): Promise<TransactionStatus> =>
 		fetchJson(`${CLEARINGHOUSE_API}/query-status/${requestId}`)
 }
 
@@ -167,7 +167,7 @@ export const brokerDealerApi = {
 			body: JSON.stringify(notification)
 		}),
 
-	queryTransactionStatus: (requestId: string): Promise<TransactionStatus> =>
+	queryRequestStatus: (requestId: string): Promise<TransactionStatus> =>
 		fetchJson(`${BROKER_DEALER_API}/query-status/${requestId}`),
 
 	extractPolicyFromPdf: (

@@ -57,7 +57,7 @@ export interface Contract {
   commissionTrails: boolean;
 }
 
-export type TransactionStatus =
+export type RequestStatus =
   | "MANIFEST_REQUESTED"
   | "MANIFEST_RECEIVED"
   | "DUE_DILIGENCE_COMPLETE"
@@ -69,16 +69,16 @@ export type TransactionStatus =
   | "TRANSFER_CONFIRMED"
   | "COMPLETE";
 
-export interface Transaction {
+export interface Request {
   pk: string;                  // "AGENT#{npn}"
-  sk: string;                  // "TRANSACTION#{requestId}"
-  type: "Transaction";
+  sk: string;                  // "REQUEST#{requestId}"
+  type: "Request";
   requestId: string;
   clientId: string;
   clientName: string;
   contracts: string[];         // Array of policy numbers
-  transactionType: "BD_CHANGE";
-  status: TransactionStatus;
+  requestType: "BD_CHANGE";
+  status: RequestStatus;
   receivingBrokerId: string;
   deliveringBrokerId: string;
   createdAt: string;           // ISO 8601
@@ -104,9 +104,9 @@ export interface GetAgentClientsResponse {
   count: number;
 }
 
-/** GET /agent/{npn}/transactions */
-export interface GetAgentTransactionsResponse {
-  transactions: Transaction[];
+/** GET /agent/{npn}/requests */
+export interface GetAgentRequestsResponse {
+  requests: Request[];
   count: number;
 }
 
@@ -135,18 +135,18 @@ export interface CreateClientResponse {
   client: Client;
 }
 
-/** POST /agent/{npn}/transactions */
-export interface CreateTransactionRequest {
+/** POST /agent/{npn}/requests */
+export interface CreateRequestRequest {
   clientId: string;
   contracts: string[];         // Array of policy numbers to include
   receivingBrokerId: string;
-  transactionType?: "BD_CHANGE";
+  requestType?: "BD_CHANGE";
 }
 
-/** POST /agent/{npn}/transactions - Response */
-export interface CreateTransactionResponse {
+/** POST /agent/{npn}/requests - Response */
+export interface CreateRequestResponse {
   message: string;
-  transaction: Transaction;
+  request: Request;
 }
 
 // ============================================================================
@@ -174,8 +174,8 @@ export interface DistributorApiEndpoints {
   /** POST /agent/{npn}/clients */
   createClient: (npn: string, request: CreateClientRequest) => Promise<CreateClientResponse>;
 
-  /** GET /agent/{npn}/transactions */
-  getAgentTransactions: (npn: string) => Promise<GetAgentTransactionsResponse>;
+  /** GET /agent/{npn}/requests */
+  getAgentRequests: (npn: string) => Promise<GetAgentRequestsResponse>;
 
   /** GET /client/{clientId} */
   getClient: (clientId: string) => Promise<GetClientResponse>;
@@ -183,6 +183,6 @@ export interface DistributorApiEndpoints {
   /** GET /client/{clientId}/contracts */
   getClientContracts: (clientId: string) => Promise<GetClientContractsResponse>;
 
-  /** POST /agent/{npn}/transactions */
-  createTransaction: (npn: string, request: CreateTransactionRequest) => Promise<CreateTransactionResponse>;
+  /** POST /agent/{npn}/requests */
+  createRequest: (npn: string, request: CreateRequestRequest) => Promise<CreateRequestResponse>;
 }

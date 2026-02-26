@@ -62,7 +62,7 @@ export enum RoutingTargetType {
 	Clearinghouse = 'clearinghouse'
 }
 
-export enum TransactionStatusValue {
+export enum RequestStatusValue {
 	ManifestRequested = 'MANIFEST_REQUESTED',
 	ManifestReceived = 'MANIFEST_RECEIVED',
 	DueDiligenceComplete = 'DUE_DILIGENCE_COMPLETE',
@@ -74,6 +74,9 @@ export enum TransactionStatusValue {
 	TransferConfirmed = 'TRANSFER_CONFIRMED',
 	Complete = 'COMPLETE'
 }
+
+// Backwards compatibility alias
+export const TransactionStatusValue = RequestStatusValue
 
 export enum BrokerRole {
 	Receiving = 'receiving',
@@ -241,10 +244,10 @@ export interface StatusHistoryItem {
 	notes?: string
 }
 
-// Transaction status
-export interface TransactionStatus {
+// Request status
+export interface RequestStatus {
 	'request-id': string
-	'current-status': TransactionStatusValue
+	'current-status': RequestStatusValue
 	'status-history'?: StatusHistoryItem[]
 	'created-at': string
 	'updated-at': string
@@ -253,6 +256,9 @@ export interface TransactionStatus {
 	'policies-affected'?: string[]
 	'additional-data'?: Record<string, unknown>
 }
+
+// Backwards compatibility alias
+export type TransactionStatus = RequestStatus
 
 // Routing information for direct carrier access
 export interface RoutingInformation {

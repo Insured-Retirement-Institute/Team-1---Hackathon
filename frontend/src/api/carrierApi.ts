@@ -118,7 +118,7 @@ const generateMockData = (tableId: CarrierTable): BdChangeRequest[] => {
 
     const record: BdChangeRequest = {
       pk: `POLICY#${config.policyPrefix}-${policyNum}`,
-      sk: `TRANSACTION#${ulid()}`,
+      sk: `REQUEST#${ulid()}`,
       requestId: ulid(),
       policyNumber: `${config.policyPrefix}-${policyNum}`,
       carrierId: config.carrierId,

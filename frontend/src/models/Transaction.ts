@@ -1,8 +1,8 @@
-export interface Transaction {
+export interface Request {
 	requestId: string
 	clientId: string
 	clientName: string
-	transactionType: string
+	requestType: string
 	status: string
 	contracts: string[]
 	receivingBrokerId: string
@@ -13,3 +13,6 @@ export interface Transaction {
 	sk: string
 	type: string
 }
+
+// Backwards compatibility alias
+export type Transaction = Request

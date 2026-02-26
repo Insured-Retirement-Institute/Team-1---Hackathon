@@ -10,7 +10,7 @@ Flow
    at {INTERNAL_API_BASE_URL}/policy-inquiry.
 3. Write the API response back to the `transact` DynamoDB table
    (keyed on requestId).
-4. Publish a TransactionUpdate event to EventBridge so the frontend
+4. Publish a RequestUpdate event to EventBridge so the frontend
    knows to refresh.
 
 Environment variables
@@ -99,7 +99,7 @@ def update_transact_record(request_id: str, api_response: dict) -> None:
     now = _now()
     table_client.update_item(
         TableName=TRANSACT_TABLE,
-        Key={"pk": {"S": request_id}, "sk": {"S": "TRANSACTION"}},
+        Key={"pk": {"S": request_id}, "sk": {"S": "REQUEST"}},
         UpdateExpression=(
             "SET #status   = :status, "
             "#updated      = :updated, "
@@ -132,7 +132,7 @@ def update_transact_record(request_id: str, api_response: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def fire_eventbridge_event(request_id: str, verb: str) -> None:
-    """Publish a UI-facing TransactionUpdate event to EventBridge."""
+    """Publish a RequestUpdate event to EventBridge."""
     events = boto3.client("events", region_name=REGION)
     detail = {
         "verb": verb,
@@ -141,7 +141,7 @@ def fire_eventbridge_event(request_id: str, verb: str) -> None:
     }
     events.put_events(Entries=[{
         "Source": "hackathon.broker-dealer",
-        "DetailType": "TransactionUpdate",
+        "DetailType": "RequestUpdate",
         "Detail": json.dumps(detail),
         "EventBusName": EVENTBRIDGE_BUS_NAME,
     }])

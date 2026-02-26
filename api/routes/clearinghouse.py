@@ -379,8 +379,8 @@ def dtcc_policy_inquiry():
 def policy_inquiry():
     """
     Process policy inquiry request.
-    Routes request to appropriate delivering broker or responds immediately if cached.
-    Creates a new tracking record with MANIFEST_REQUESTED status.
+    Looks up policies from IIEX cache and responds immediately.
+    Creates a tracking record for audit purposes.
 
     Unified API endpoint - replaces /submit-policy-inquiry-request
     """
@@ -407,9 +407,11 @@ def policy_inquiry():
 
         requesting_firm = data.get('requestingFirm', {})
         client = data.get('client', {})
+        servicing_agent = requesting_firm.get('servicingAgent', {})
         policy_numbers = client.get('policyNumbers', [])
+        client_ssn = client.get('ssn', '')
 
-        logger.info(f"Received policy inquiry request - Transaction ID: {request_id}")
+        logger.info(f"Received policy inquiry request - Request ID: {request_id}")
         logger.info(f"Requesting Firm: {requesting_firm.get('firmName')}")
         logger.info(f"Client: {client.get('clientName')}")
         logger.info(f"Policy Numbers: {policy_numbers}")
@@ -418,21 +420,45 @@ def policy_inquiry():
         carrier_id, carrier_name = get_carrier_info(policy_numbers)
 
         # Get SSN last 4 if full SSN provided
-        ssn = client.get('ssn', '')
-        ssn_last4 = ssn[-4:] if len(ssn) >= 4 else None
+        ssn_last4 = client_ssn[-4:] if len(client_ssn) >= 4 else None
 
-        # Create tracking record
+        # Look up policies from IIEX cache
+        policies = []
+        client_name_from_db = None
+
+        for policy_number in policy_numbers:
+            policy = lookup_policy_from_iiex(policy_number)
+            if policy:
+                if not client_name_from_db:
+                    client_name_from_db = policy.get('clientName')
+                    if not ssn_last4 and policy.get('ownerSSN'):
+                        ssn_last4 = policy.get('ownerSSN')[-4:]
+
+                formatted_policy = format_iiex_policy_for_response(policy, client_ssn)
+                policies.append(formatted_policy)
+            else:
+                # Policy not found in IIEX
+                policies.append({
+                    "policyNumber": policy_number,
+                    "carrierName": None,
+                    "errors": [{
+                        "errorCode": "policyNotFound",
+                        "message": f"Policy {policy_number} not found in IIEX records"
+                    }]
+                })
+
+        # Create tracking record for audit
         record = create_tracking_record(
             request_id=request_id,
-            initial_status="MANIFEST_REQUESTED",
+            initial_status="POLICY_INFO_RECEIVED",
             receiving_broker_id=requesting_firm.get('firmId'),
-            delivering_broker_id=None,  # To be determined
+            delivering_broker_id=None,
             carrier_id=carrier_id,
             carrier_name=carrier_name,
-            client_name=client.get('clientName'),
+            client_name=client_name_from_db or client.get('clientName'),
             ssn_last4=ssn_last4,
             policies_affected=policy_numbers,
-            notes="Policy inquiry request received from receiving broker"
+            notes="Policy inquiry completed from IIEX cache"
         )
 
         # Store request details
@@ -440,13 +466,43 @@ def policy_inquiry():
         record["additionalData"]["clientRequest"] = client
 
         put_item(REQUEST_TRACKING_TABLE, record)
-        logger.info(f"Created tracking record for transaction {request_id}")
+        logger.info(f"Created tracking record for request {request_id}")
+
+        # Build response payload
+        response_payload = {
+            "requestingFirm": {
+                "name": requesting_firm.get('firmName'),
+                "firmId": requesting_firm.get('firmId'),
+                "servicingAgent": {
+                    "producerName": servicing_agent.get('agentName'),
+                    "npn": servicing_agent.get('npn')
+                }
+            },
+            "producerValidation": {
+                "producerName": servicing_agent.get('agentName'),
+                "npn": servicing_agent.get('npn'),
+                "errors": []
+            },
+            "client": {
+                "clientName": client_name_from_db or client.get('clientName'),
+                "ssnLast4": ssn_last4,
+                "policies": policies
+            },
+            "enums": {
+                "accountType": ["individual", "joint", "trust", "custodial", "entity"],
+                "planType": ["nonQualified", "rothIra", "traditionalIra", "sep", "simple"]
+            }
+        }
+
+        logger.info(f"Returning {len(policies)} policies for request {request_id}")
 
         return create_response(
-            "RECEIVED",
-            "Policy inquiry request received and routed to delivering broker",
+            "IMMEDIATE",
+            "Policy inquiry processed successfully",
             request_id,
-            processing_mode="deferred"
+            response_payload,
+            200,
+            processing_mode="immediate"
         )
 
     except Exception as e:
