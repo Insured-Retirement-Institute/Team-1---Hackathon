@@ -369,9 +369,8 @@ def bd_change():
                 400
             )
 
-        # Validate required fields
-        required_fields = ['request-id', 'receiving-broker-id', 'delivering-broker-id',
-                           'carrier-id', 'policy-id']
+        # Validate required fields (v0.1.1 schema)
+        required_fields = ['requestingFirm', 'carrier', 'client']
         missing_fields = [field for field in required_fields if field not in data]
         if missing_fields:
             return create_error_response(
@@ -380,10 +379,11 @@ def bd_change():
                 400
             )
 
-        logger.info(f"Received BD change request - Transaction ID: {request_id}")
-        logger.info(f"Policy ID: {data.get('policy-id')}")
-        logger.info(f"Receiving Broker: {data.get('receiving-broker-id')}")
-        logger.info(f"Delivering Broker: {data.get('delivering-broker-id')}")
+        logger.info(f"Received BD change request - Request ID: {request_id}")
+        logger.info(f"Requesting Firm: {data.get('requestingFirm', {}).get('firmName')}")
+        logger.info(f"Carrier: {data.get('carrier', {}).get('carrierName')}")
+        logger.info(f"Client: {data.get('client', {}).get('clientName')}")
+        logger.info(f"Policy Numbers: {data.get('client', {}).get('policyNumbers')}")
 
         # Find and update existing transaction
         record, table_name = find_request_by_id(request_id)

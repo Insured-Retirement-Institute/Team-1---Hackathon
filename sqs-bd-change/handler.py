@@ -28,13 +28,15 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
-
-import boto3
 import urllib3
+import boto3
+import random
+import time
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+DELAY = bool(os.environ.get("DELAY", "false").lower() == "true")
 INTERNAL_API_BASE_URL = os.environ.get(
     "INTERNAL_API_BASE_URL",
     "https://sv4fyqvgj3vwuwflc5olwwa4xq0hcele.lambda-url.us-east-1.on.aws/v1"
@@ -61,7 +63,7 @@ _http = urllib3.PoolManager()
 
 def call_bd_change_api(request_id: str, request_data: dict) -> dict:
     """POST /servicing-agent-changes/create on the internal API and return the parsed response."""
-    url = f"{INTERNAL_API_BASE_URL}/broker-dealer/servicing-agent-changes/create"
+    url = f"{INTERNAL_API_BASE_URL}/servicing-agent-changes/create"
 
     resp = _http.request(
         "POST",
@@ -143,6 +145,12 @@ def update_transact_record(
 def fire_eventbridge_event(request_id: str, verb: str) -> None:
     """Publish a UI-facing RequestUpdate event to EventBridge."""
     events = boto3.client("events", region_name=REGION)
+
+    # Random delay between 1-7 seconds
+    if DELAY:
+        sleep_duration = random.randint(1, 7)
+        time.sleep(sleep_duration)
+
     detail = {
         "verb": verb,
         "requestId": request_id,
