@@ -55,7 +55,7 @@ onUnmounted(() => {
 
 <template>
 	<div class="w-full">
-		<div class="bg-[#f8f8f8] rounded-xl p-6">
+		<div class="bg-[#F1F1F1] border border-[#CCCCCC] rounded-xl p-6">
 			<div class="flex items-center justify-between mb-4">
 				<div class="flex items-center gap-4">
 					<h1 class="text-xl font-bold text-gray-900">EventSource Monitor</h1>

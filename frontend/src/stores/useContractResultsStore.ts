@@ -293,7 +293,7 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 			}
 
 			const response = await brokerDealerApi.triggerPolicyInquiry(request)
-
+			console.log(response.requestId)
 
 			if (isClientResponse(response.payload?.client) && response.payload?.client.policies && response.payload.client.policies.length > 0) {
 				// Map API response to ContractRecords
@@ -348,21 +348,6 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 
 		await new Promise(resolve => setTimeout(resolve, 3000))
 
-		let requestId = ''
-
-		try {
-			const result = await distributorApi.createRequest('12345678', {
-				clientId: clientSearch.value.clientId,
-				contracts: policyNumbers,
-				receivingBrokerId: 'BD002',
-			})
-
-			requestId = result.request.transactionId
-		} catch {
-
-		} finally {
-
-		}
 
 		if (autoLookup.length) {
 			try {
@@ -417,8 +402,8 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 						firmId: undefined
 					}
 				})
-			} catch {
-
+			} catch (e) {
+				console.error(e)
 			} finally {
 				loaderStore.completeTask(group?.[0]?.carrierName ?? '')
 			}

@@ -265,7 +265,7 @@ export interface RoutingInformation {
 export interface StandardResponse {
 	code: string
 	message: string
-	transactionId: string
+	requestId: string
 	payload?: PolicyInquiryResponse | Record<string, unknown> | null
 	processingMode?: ProcessingMode
 	estimatedResponseTime?: string

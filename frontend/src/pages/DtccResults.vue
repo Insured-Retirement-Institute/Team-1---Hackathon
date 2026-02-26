@@ -35,7 +35,7 @@ function getRecordIndex(id: string | number): number {
 			class="mb-4"
 		/>
 
-		<div class="rounded-xl bg-[#f8f8f8] p-6" v-if="custodialRecords.length">
+		<div class="rounded-xl bg-[#F1F1F1] border border-[#CCCCCC] p-6" v-if="custodialRecords.length">
 			<div class="flex items-center gap-2 pl-4 mb-1">
 				<FingerPrintIcon />
 				<p class="font-bold text-2xl">Qualified Contracts</p>
@@ -57,7 +57,7 @@ function getRecordIndex(id: string | number): number {
 			</div>
 		</div>
 
-		<div class="rounded-xl bg-[#f8f8f8] p-6 mt-4" v-if="unresolvedRecords.length">
+		<div class="rounded-xl bg-[#F1F1F1] border border-[#CCCCCC] p-6 mt-4" v-if="unresolvedRecords.length">
 			<div class="flex items-center gap-2 pl-4 mb-1">
 				<QuestionCircleIcon />
 				<p class="font-bold text-2xl">No Electronic Records found</p>

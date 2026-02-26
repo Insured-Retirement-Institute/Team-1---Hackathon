@@ -114,7 +114,7 @@ function deleteRecord(record: T) {
 </script>
 
 <template>
-	<div class="bg-[#f8f8f8] rounded-xl">
+	<div class="bg-[#F1F1F1] border border-[#CCCCCC] rounded-xl">
 		<div class="flex items-center justify-between p-4">
 			<p v-if="title" class="text-gray-900 text-xl font-bold">{{ title }}</p>
 			<div v-else></div>
@@ -178,7 +178,7 @@ function deleteRecord(record: T) {
 						v-for="(record, index) in sortedRecords"
 						:key="record.id"
 						:class="[
-							'bg-[#f8f8f8]',
+							'bg-[#F1F1F1]',
 							index < sortedRecords.length - 1 ? 'border-b dark:border-gray-700 border-gray-200' : '',
 							editingId === record.id ? 'bg-blue-50' : ''
 						]"
