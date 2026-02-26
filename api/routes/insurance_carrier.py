@@ -330,6 +330,107 @@ def health_check():
     }), 200
 
 
+@BP.route('/validate-policies', methods=['POST'], strict_slashes=False)
+def validate_policies():
+    """
+    Validate policies by looking up each one from carrier tables.
+    Returns detailed policy information for each policy number.
+
+    Request:
+        { "policies": ["ATH-100001", "PAC-200001", ...] }
+
+    Response:
+        PolicyInquiryResponse format with client.policies array
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return create_error_response(
+                "INVALID_PAYLOAD",
+                "Request body is required",
+                400
+            )
+
+        policy_numbers = data.get('policies', [])
+        if not policy_numbers:
+            return create_error_response(
+                "VALIDATION_ERROR",
+                "policies array is required and cannot be empty",
+                400
+            )
+
+        logger.info(f"Validating {len(policy_numbers)} policies: {policy_numbers}")
+
+        policies = []
+        client_name = None
+        ssn_last4 = None
+
+        for policy_number in policy_numbers:
+            policy = lookup_policy(policy_number)
+            if policy:
+                if not client_name:
+                    client_name = policy.get('clientName')
+                if not ssn_last4 and policy.get('ownerSSN'):
+                    ssn_last4 = policy.get('ownerSSN')[-4:]
+
+                formatted = format_policy_for_response(policy)
+                policies.append(formatted)
+            else:
+                # Policy not found
+                policies.append({
+                    "policyNumber": policy_number,
+                    "carrierName": None,
+                    "errors": [{
+                        "errorCode": "policyNotFound",
+                        "message": f"Policy {policy_number} not found in carrier records"
+                    }]
+                })
+
+        logger.info(f"Validated {len(policies)} policies, {len([p for p in policies if not p.get('errors')])} found")
+
+        response_payload = {
+            "requestingFirm": {
+                "name": None,
+                "firmId": None,
+                "servicingAgent": {
+                    "producerName": None,
+                    "npn": None
+                }
+            },
+            "producerValidation": {
+                "producerName": None,
+                "npn": None,
+                "errors": []
+            },
+            "client": {
+                "clientName": client_name,
+                "ssnLast4": ssn_last4,
+                "policies": policies
+            },
+            "enums": {
+                "accountType": ["individual", "joint", "trust", "custodial", "entity"],
+                "planType": ["nonQualified", "rothIra", "traditionalIra", "sep", "simple"]
+            }
+        }
+
+        return create_response(
+            "IMMEDIATE",
+            f"Validated {len(policies)} policies",
+            str(uuid.uuid4()),  # Generate a request ID for this call
+            response_payload,
+            200,
+            processing_mode="immediate"
+        )
+
+    except Exception as e:
+        logger.error(f"Error validating policies: {str(e)}")
+        return create_error_response(
+            "INTERNAL_ERROR",
+            "Internal server error occurred",
+            500
+        )
+
+
 def _process_carrier_policy_inquiry(carrier_key: str):
     """
     Common policy inquiry logic for carrier-specific endpoints.
