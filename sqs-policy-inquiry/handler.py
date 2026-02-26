@@ -34,7 +34,7 @@ logger.setLevel(logging.INFO)
 
 INTERNAL_API_BASE_URL = os.environ.get(
     "INTERNAL_API_BASE_URL",
-    "https://3wn6kzs5h6.execute-api.us-east-1.amazonaws.com/prod",
+    "https://sv4fyqvgj3vwuwflc5olwwa4xq0hcele.lambda-url.us-east-1.on.aws/v1"
 ).rstrip("/")
 TRANSACT_TABLE = os.environ.get("TRANSACT_TABLE", "transact")
 EVENTBRIDGE_BUS_NAME = os.environ.get("EVENTBRIDGE_BUS_NAME", "hackathon-events")
@@ -58,7 +58,7 @@ _http = urllib3.PoolManager()
 
 def call_policy_inquiry_api(request_id: str, request_data: dict) -> dict:
     """POST /policy-inquiries/create on the internal API and return the parsed response."""
-    url = f"{INTERNAL_API_BASE_URL}/policy-inquiries/create"
+    url = f"{INTERNAL_API_BASE_URL}/clearinghouse/policy-inquiries/create"
 
     resp = _http.request(
         "POST",
@@ -131,13 +131,14 @@ def update_transact_record(request_id: str, api_response: dict) -> None:
 # Step 3 – fire EventBridge event
 # ---------------------------------------------------------------------------
 
-def fire_eventbridge_event(request_id: str, verb: str) -> None:
+def fire_eventbridge_event(request_id: str, verb: str, api_response: dict) -> None:
     """Publish a RequestUpdate event to EventBridge."""
     events = boto3.client("events", region_name=REGION)
     detail = {
         "verb": verb,
         "requestId": request_id,
         "timestamp": _now(),
+        "body": api_response,
     }
     events.put_events(Entries=[{
         "Source": "hackathon.broker-dealer",
@@ -169,7 +170,7 @@ def process_record(record: dict) -> None:
     )
 
     update_transact_record(request_id, api_response)
-    fire_eventbridge_event(request_id, "policy_info_received")
+    fire_eventbridge_event(request_id, "policy_info_received", api_response)
 
 
 # ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-$folders = @("api", "api-bd-change-callback", "sqs-bd-change", "sqs-policy-inquiry")
+$folders = @("api-bd-change-callback", "sqs-bd-change", "sqs-policy-inquiry")
 
 foreach ($folder in $folders) {
     Write-Host "Processing folder: $folder"
