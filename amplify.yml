@@ -9,7 +9,7 @@ frontend:
     build:
       commands:
         # Build the Vite app
-        - npm run build
+        - npm run build-only
   artifacts:
     # Vite outputs to dist by default
     baseDirectory: frontend/dist
