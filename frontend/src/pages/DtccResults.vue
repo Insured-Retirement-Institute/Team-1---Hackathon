@@ -73,6 +73,8 @@ function getRecordIndex(id: string | number): number {
 				>
 					<ManualContractDetailsCard
 						v-model="contractResultsStore.dtccContractResults[getRecordIndex(record.id)]!"
+						:show-checkbox="false"
+						:show-download-carrier-letter="true"
 					/>
 				</div>
 			</div>

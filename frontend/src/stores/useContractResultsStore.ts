@@ -322,26 +322,9 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 	async function initiateCarrierSearch(): Promise<void> {
 		const loaderStore = useLoaderStore()
 
-		const tasks = []
-
 		const autoLookup = dtccContractResults.value.filter(r => r.dtccResolved)
-		const manualLookup = dtccContractResults.value.filter(r => !r.dtccResolved)
 
-		const groupedManualLookup = groupBy(manualLookup, item => item.carrierName)
-
-		if (autoLookup.length)
-			tasks.push({
-				id: 'validate',
-				label: 'Validating contracts with carriers'
-			})
-
-		if (manualLookup.length) {}
-			tasks.push(...Object.values(groupedManualLookup).map(v => ({
-				id: v[0]?.carrierName ?? '',
-				label: `Generating ${v[0]?.carrierName} letter`
-			})))
-
-		loaderStore.open('Validating', tasks)
+		loaderStore.open('Validating')
 
 		const selectedRecords = dtccContractResults.value.filter(r => r.selected)
 		const policyNumbers = selectedRecords.map(r => r.contractNumber)
@@ -375,36 +358,6 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 				// Fallback to fake data on API error
 				carrierContractResults.value = selectedRecords.map(generateFakeCarrierResult)
 			} finally {
-				loaderStore.completeTask('validate')
-			}
-		}
-
-		for (const group of Object.values(groupedManualLookup)) {
-			try {
-				await brokerDealerApi.generateCarrierLetter({
-					requestId: ulid(),
-					carrierName: group?.[0]?.carrierName ?? '',
-					client: {
-						fullName: ''
-					},
-					policyNumbers: group.map(g => g.contractNumber),
-					currentAgent: {
-						name: ''
-					},
-					newAgent: {
-						name: ''
-					},
-					reasonForChange: '',
-					trailingCommission: 'yes',
-					requestingFirm: {
-						firmName: '',
-						firmId: undefined
-					}
-				})
-			} catch (e) {
-				console.error(e)
-			} finally {
-				loaderStore.completeTask(group?.[0]?.carrierName ?? '')
 			}
 		}
 
