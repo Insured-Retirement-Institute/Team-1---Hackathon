@@ -246,7 +246,7 @@ def format_iiex_policy_for_response(policy: dict, client_ssn: str = None) -> dic
         "productName": policy.get("productName"),
         "cusip": policy.get("cusip"),
         "hasTrailingCommission": policy.get("trailingCommission", False),
-        "contractStatus": POLICY_STATUS_MAP.get(policy_status, "active"),
+        "contractStatus": POLICY_STATUS_MAP.get(policy_status, "Inactive"),
         "withdrawalStructure": {
             "hasSystematicWithdrawal": False
         },

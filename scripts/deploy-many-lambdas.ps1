@@ -1,4 +1,4 @@
-$folders = @("api-bd-change-callback", "sqs-bd-change", "sqs-policy-inquiry")
+$folders = @("api", "api-bd-change-callback", "sqs-bd-change", "sqs-policy-inquiry")
 # $folders = @("api")
 
 foreach ($folder in $folders) {

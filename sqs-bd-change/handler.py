@@ -28,6 +28,7 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
+import urllib3
 import boto3
 import random
 import time
