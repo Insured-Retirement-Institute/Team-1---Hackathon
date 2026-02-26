@@ -1,6 +1,7 @@
 # cd api
+# mkdir package
 # pip install -r requirements.txt -t package
-rm .\lambda_package.zip
+rm lambda_package.zip
 cd package
 Compress-Archive -Path * -DestinationPath ..\lambda_package.zip
 cd ..

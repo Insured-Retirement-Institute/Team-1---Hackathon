@@ -48,8 +48,10 @@ try:
         transfer_notifications_bp,
         status_bp,
     )
-    app.register_blueprint(servicing_agent_changes_bp, url_prefix="/v1/servicing-agent-changes")
-    app.register_blueprint(transfer_notifications_bp, url_prefix="/v1/transfer-notifications")
+    app.register_blueprint(servicing_agent_changes_bp,
+                           url_prefix="/v1/servicing-agent-changes")
+    app.register_blueprint(transfer_notifications_bp,
+                           url_prefix="/v1/transfer-notifications")
     app.register_blueprint(status_bp, url_prefix="/v1/status")
 except Exception as e:
     print(f"Failed to register unified API blueprints: {e}")
@@ -98,7 +100,10 @@ def internal_error(e):
 def handler(event, context):
     # event = normalize_lambda_event(event)
     event = normalize_lambda_event(event)
-    return serverless_wsgi.handle_request(app, event, context)
+    print(f"Incoming event: {event}")
+    response = serverless_wsgi.handle_request(app, event, context)
+    print(f"Response: {response}")
+    return response
 
 
 if __name__ == '__main__':

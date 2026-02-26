@@ -113,17 +113,17 @@ def update_transact_record(
             "#history         = list_append(if_not_exists(#history, :empty), :hist)"
         ),
         ExpressionAttributeNames={
-            "#status":      "current-status",
-            "#updated":     "updated-at",
+            "#status": "current-status",
+            "#updated": "updated-at",
             "#bd_callback": "bd-change-callback",
-            "#history":     "status-history",
+            "#history": "status-history",
         },
         ExpressionAttributeValues={
-            ":status":   new_status,
-            ":updated":  now,
+            ":status": new_status,
+            ":updated": now,
             ":callback": callback_body,
-            ":empty":    [],
-            ":hist":     [{"status": new_status, "timestamp": now, "notes": notes}],
+            ":empty": [],
+            ":hist": [{"status": new_status, "timestamp": now, "notes": notes}],
         },
     )
     logger.info(
@@ -145,9 +145,9 @@ def fire_eventbridge_event(request_id: str, verb: str) -> None:
         "timestamp": _now(),
     }
     events.put_events(Entries=[{
-        "Source":       "hackathon.broker-dealer",
-        "DetailType":   "RequestUpdate",
-        "Detail":       json.dumps(detail),
+        "Source": "hackathon.broker-dealer",
+        "DetailType": "RequestUpdate",
+        "Detail": json.dumps(detail),
         "EventBusName": EVENTBRIDGE_BUS_NAME,
     }])
     logger.info(

@@ -114,20 +114,20 @@ def update_transact_record(
             "#history          = list_append(if_not_exists(#history, :empty), :hist)"
         ),
         ExpressionAttributeNames={
-            "#status":     "current-status",
-            "#updated":    "updated-at",
+            "#status": "current-status",
+            "#updated": "updated-at",
             "#bd_request": "bd-change-request",
-            "#bd_ack":     "bd-change-acknowledgement",
-            "#history":    "status-history",
+            "#bd_ack": "bd-change-acknowledgement",
+            "#history": "status-history",
         },
         ExpressionAttributeValues={
-            ":status":     new_status,
-            ":updated":    now,
+            ":status": new_status,
+            ":updated": now,
             ":bd_request": request_data,
-            ":bd_ack":     api_response,
-            ":empty":      [],
-            ":hist":       [{"status": new_status, "timestamp": now,
-                             "notes": "BD change request submitted to IIEX/carrier"}],
+            ":bd_ack": api_response,
+            ":empty": [],
+            ":hist": [{"status": new_status, "timestamp": now,
+                       "notes": "BD change request submitted to IIEX/carrier"}],
         },
     )
     logger.info(
@@ -149,9 +149,9 @@ def fire_eventbridge_event(request_id: str, verb: str) -> None:
         "timestamp": _now(),
     }
     events.put_events(Entries=[{
-        "Source":       "hackathon.broker-dealer",
-        "DetailType":   "RequestUpdate",
-        "Detail":       json.dumps(detail),
+        "Source": "hackathon.broker-dealer",
+        "DetailType": "RequestUpdate",
+        "Detail": json.dumps(detail),
         "EventBusName": EVENTBRIDGE_BUS_NAME,
     }])
     logger.info(
@@ -167,7 +167,7 @@ def fire_eventbridge_event(request_id: str, verb: str) -> None:
 def process_record(record: dict) -> None:
     body = json.loads(record["body"])
     request_id = body["requestId"]
-    request_data   = body["requestData"]
+    request_data = body["requestData"]
 
     logger.info("Processing BD change — requestId=%s", request_id)
 
