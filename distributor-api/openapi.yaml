@@ -452,7 +452,7 @@ components:
           enum: [Request]
         requestId:
           type: string
-          format: uuid
+          format: ulid
         clientId:
           type: string
         clientName:

@@ -68,8 +68,12 @@ from flask import request, jsonify, Blueprint
 from datetime import datetime, date, timezone
 import sys
 import uuid
+import re
 import json
 import logging
+
+# ULID validation: 26 chars using Crockford's Base32 (excludes I, L, O, U)
+_ULID_PATTERN = re.compile(r'^[0-9A-HJKMNP-TV-Z]{26}$', re.IGNORECASE)
 from urllib.request import urlopen, Request as URLRequest
 from urllib.parse import quote
 from urllib.error import HTTPError, URLError
@@ -948,12 +952,10 @@ def query_status(requestId):
     Query transaction status by request ID.
     """
     try:
-        try:
-            uuid.UUID(requestId)
-        except ValueError:
+        if not _ULID_PATTERN.match(requestId):
             return create_error_response(
                 "INVALID_REQUEST_ID",
-                "Request ID must be a valid UUID",
+                "Request ID must be a valid ULID (26 characters, Crockford Base32)",
                 400
             )
 

@@ -4,8 +4,11 @@ Standalone copy — no Flask blueprint or route imports.
 """
 
 from flask import jsonify
-import uuid
+import re
 import logging
+
+# ULID validation: 26 chars using Crockford's Base32 (excludes I, L, O, U)
+_ULID_PATTERN = re.compile(r'^[0-9A-HJKMNP-TV-Z]{26}$', re.IGNORECASE)
 
 logger = logging.getLogger(__name__)
 
@@ -60,13 +63,11 @@ def validate_request_id(headers):
         return None, create_error_response(
             "MISSING_HEADER", "requestId header is required", 400
         )
-    try:
-        uuid.UUID(request_id)
-        return request_id, None
-    except ValueError:
+    if not _ULID_PATTERN.match(request_id):
         return None, create_error_response(
-            "INVALID_HEADER", "requestId must be a valid UUID", 400
+            "INVALID_HEADER", "requestId must be a valid ULID (26 characters, Crockford Base32)", 400
         )
+    return request_id, None
 
 
 def normalize_lambda_event(event):

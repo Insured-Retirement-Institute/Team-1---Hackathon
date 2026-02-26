@@ -60,7 +60,7 @@ function generateCusipNumber(): string {
 
 function mapDetailedPolicyToContractRecord(policy: DetailedPolicyInfo, resolved: boolean): ContractRecord {
 	return {
-		id: crypto.randomUUID(),
+		id: ulid(),
 		contractNumber: policy.policyNumber ?? '',
 		carrierName: policy.carrierName ?? '',
 		productName: policy.productName ?? '',
@@ -141,7 +141,7 @@ function generateFakeDtccResult(searchContract: ContractRecord, index: number): 
 		const carrierName = randomElement(CARRIER_NAMES)
 		const productName = CARRIER_PRODUCTS[carrierName]!
 		return {
-			id: crypto.randomUUID(),
+			id: ulid(),
 			carrierName,
 			productName,
 			contractNumber: searchContract.contractNumber,
@@ -157,7 +157,7 @@ function generateFakeDtccResult(searchContract: ContractRecord, index: number): 
 
 	// Unresolved - return partial data
 	return {
-		id: crypto.randomUUID(),
+		id: ulid(),
 		carrierName: '',
 		productName: '',
 		contractNumber: searchContract.contractNumber,
@@ -174,7 +174,7 @@ function generateFakeDtccResult(searchContract: ContractRecord, index: number): 
 function generateFakeCarrierResult(dtccRecord: ContractRecord): ContractRecord {
 	return {
 		...dtccRecord,
-		id: crypto.randomUUID(),
+		id: ulid(),
 		planType: randomEnumValue(PlanType),
 		accountType: randomEnumValue(AccountType),
 		ownerName: randomElement(OWNER_NAMES),
@@ -233,7 +233,7 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 
 	function createEmptyContract(): ContractRecord {
 		return {
-			id: crypto.randomUUID(),
+			id: ulid(),
 			carrierName: '',
 			productName: '',
 			contractNumber: '',

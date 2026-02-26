@@ -4,11 +4,15 @@ Implements the OpenAPI specification for clearinghouse endpoints
 Integrated with DynamoDB request-tracking table.
 """
 import os
+import re
 from flask import request, jsonify, Blueprint
 from datetime import datetime, timezone
 import sys
 import uuid
 import logging
+
+# ULID validation: 26 chars using Crockford's Base32 (excludes I, L, O, U)
+_ULID_PATTERN = re.compile(r'^[0-9A-HJKMNP-TV-Z]{26}$', re.IGNORECASE)
 from helpers import (create_response,
                      create_error_response,
                      validate_request_id)
@@ -907,13 +911,11 @@ def query_status(requestId):
     Retrieve current status and history for a specific transaction from request-tracking table.
     """
     try:
-        # Validate UUID format
-        try:
-            uuid.UUID(requestId)
-        except ValueError:
+        # Validate ULID format (per spec v0.1.1)
+        if not _ULID_PATTERN.match(requestId):
             return create_error_response(
                 "INVALID_REQUEST_ID",
-                "Request ID must be a valid UUID",
+                "Request ID must be a valid ULID (26 characters, Crockford Base32)",
                 400
             )
 
