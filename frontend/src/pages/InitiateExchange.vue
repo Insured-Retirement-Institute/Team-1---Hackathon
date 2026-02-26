@@ -13,12 +13,27 @@ import { useLoaderStore } from '@/stores/useLoaderStore';
 import { brokerDealerApi } from '@/api/Api';
 import { monotonicFactory } from 'ulid';
 import { fileToBase64 } from '@/utils/fileUtils';
+import { useClientStore } from '@/stores/useClientStore';
+import { ref } from 'vue';
+import type { PolicyInquiryResponse } from '@/models/ClearinghouseApi';
 
 const ulid = monotonicFactory()
+
+const props = defineProps<{
+	clientId?: string
+}>()
+
+const clientStore = useClientStore()
+
+const client = clientStore.clients.find(c => c.clientId === props.clientId)
 
 const contractResultsStore = useContractResultsStore()
 
 const { searchContracts, clientSearch } = storeToRefs(contractResultsStore)
+
+if (client) {
+	clientSearch.value = client
+}
 
 if (searchContracts.value.length === 0) {
 	contractResultsStore.addSearchContract()
@@ -47,6 +62,13 @@ onChange(async files => {
 		})
 
 		console.log('PDF extraction response:', response)
+
+		const contractNumbers = ((response.payload as any).policyInquiryResponse as PolicyInquiryResponse).client.policies.map(p => p.policyNumber)
+
+		searchContracts.value = []
+
+		contractNumbers.forEach(c => contractResultsStore.addSearchContract({ contractNumber: c ?? '' }))
+
 	} catch (error) {
 		console.error('PDF extraction failed:', error)
 	} finally {
@@ -68,7 +90,7 @@ onChange(async files => {
 			</div>
 			<div class="flex flex-wrap *:p-4 items-center">
 				<div class="w-1/3">
-					<FwbInput v-model="clientSearch.firstName" label="First Name">
+					<FwbInput v-model="clientSearch.clientName" label="Client Name" :disabled="!!clientId">
 						<template #prefix>
 							<UserIcon />
 						</template>
@@ -76,15 +98,7 @@ onChange(async files => {
 				</div>
 
 				<div class="w-1/3">
-					<FwbInput v-model="clientSearch.lastName" label="Last Name">
-						<template #prefix>
-							<UserIcon />
-						</template>
-					</FwbInput>
-				</div>
-
-				<div class="w-1/3">
-					<FwbInput v-model="clientSearch.ssn" label="SSN">
+					<FwbInput v-model="clientSearch.ssnLast4" label="SSN" :disabled="!!clientId">
 						<template #prefix>
 							<ProfileCardIcon />
 						</template>

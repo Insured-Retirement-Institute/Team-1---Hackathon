@@ -14,8 +14,9 @@ const router = createRouter({
 			component: () => import('@/pages/Home.vue')
 		},
 		{
-			path: '/initiate-exchange',
+			path: '/initiate-exchange/:clientId?',
 			component: () => import('@/pages/InitiateExchange.vue'),
+			props: true,
 			meta: {
 				title: 'Enter Contract Details for Client',
 				next: {
@@ -39,6 +40,7 @@ const router = createRouter({
 						await contractResultsStore.initiateCarrierSearch()
 					}
 				},
+				nextLabel: 'Move these Contracts',
 				previous: {
 					route: '/initiate-exchange'
 				}
@@ -67,6 +69,13 @@ const router = createRouter({
 			component: () => import('@/pages/ApiHealth.vue'),
 			meta: {
 				title: 'API Health'
+			}
+		},
+		{
+			path: '/event-source-health',
+			component: () => import('@/pages/EventSourceHealth.vue'),
+			meta: {
+				title: 'EventSource Monitor'
 			}
 		}
 	],

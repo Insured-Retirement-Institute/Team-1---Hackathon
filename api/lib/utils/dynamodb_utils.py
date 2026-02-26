@@ -330,13 +330,13 @@ def get_policy_by_number(
 
 def get_policy_by_transaction(
     table_name: str,
-    transaction_id: str,
+    request_id: str,
     region: str = "us-east-1"
 ) -> Optional[Dict]:
-    """Return the policy associated with *transaction_id*."""
+    """Return the policy associated with *request_id*."""
     results = scan_items(
         table_name,
-        filter_expression=Attr("transactionId").eq(transaction_id),
+        filter_expression=Attr("requestId").eq(request_id),
         region=region,
     )
     return results[0] if results else None
@@ -398,7 +398,7 @@ def put_policy(
 def update_policy_status(
     table_name: str,
     policy_number: str,
-    transaction_id: str,
+    request_id: str,
     new_status: str,
     notes: Optional[str] = None,
     region: str = "us-east-1"
@@ -422,8 +422,8 @@ def update_policy_status(
     history_entry = {"status": new_status, "timestamp": now}
     if notes:
         history_entry["notes"] = notes
-    if transaction_id:
-        history_entry["transactionId"] = transaction_id
+    if request_id:
+        history_entry["requestId"] = request_id
 
     existing_history = policy.get("statusHistory", [])
     updated_history = existing_history + [history_entry]
@@ -435,7 +435,7 @@ def update_policy_status(
         updates={
             "contractStatus": new_status,
             "currentStatus": new_status,
-            "transactionId": transaction_id,
+            "requestId": request_id,
             "updatedAt": now,
             "statusHistory": updated_history,
         },
@@ -486,7 +486,7 @@ def format_policy_detail_for_api(policy: Dict) -> Dict:
         "currentStatus": policy.get("currentStatus") or policy.get("contractStatus"),
         "withdrawalStructure": policy.get("withdrawalStructure", {"systematicInPlace": False}),
         "servicingAgent": policy.get("servicingAgent", {}),
-        "transactionId": policy.get("transactionId"),
+        "requestId": policy.get("requestId"),
         "statusHistory": policy.get("statusHistory", []),
         "createdAt": policy.get("createdAt"),
         "updatedAt": policy.get("updatedAt"),

@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import SortIcon from '@/icons/SortIcon.svg'
-import type { InflightChange } from '@/models/InflightChange'
+import type { Transaction } from '@/models/Transaction'
 import type { Client } from '@/models/Client'
-import { FwbBadge, FwbDropdown, FwbListGroup, FwbListGroupItem, FwbProgress } from 'flowbite-vue'
+import { FwbBadge, FwbButton, FwbDropdown, FwbListGroup, FwbListGroupItem } from 'flowbite-vue'
 
-type SortableColumn = 'clientName' | keyof InflightChange
+type BadgeType = 'default' | 'dark' | 'red' | 'green' | 'yellow' | 'indigo' | 'purple' | 'pink'
+type SortableColumn = keyof Transaction
 type SortDirection = 'asc' | 'desc'
 
 const props = defineProps<{
-	changes: InflightChange[]
+	changes: Transaction[]
 	clients: Client[]
 }>()
 
@@ -25,44 +26,20 @@ function toggleSort(column: SortableColumn) {
 	}
 }
 
-function getClientName(clientId: string): string {
-	const client = props.clients.find(c => c.id === clientId)
-	return client ? `${client.firstName} ${client.lastName}` : 'Unknown'
+function getClientSsnLast4(clientId: string): string {
+	const client = props.clients.find(c => c.clientId === clientId)
+	return client?.ssnLast4 ?? ''
 }
-
-function getClientEmail(clientId: string): string {
-	const client = props.clients.find(c => c.id === clientId)
-	return client?.email ?? ''
-}
-
-interface ChangeWithClientInfo extends InflightChange {
-	clientName: string
-	clientEmail: string
-}
-
-const changesWithClientName = computed<ChangeWithClientInfo[]>(() => {
-	return props.changes.map(change => ({
-		...change,
-		clientName: getClientName(change.clientId),
-		clientEmail: getClientEmail(change.clientId)
-	}))
-})
 
 const sortedChanges = computed(() => {
-	if (!sortColumn.value) return changesWithClientName.value
+	if (!sortColumn.value) return props.changes
 
-	return [...changesWithClientName.value].sort((a, b) => {
-		const aVal = a[sortColumn.value as keyof ChangeWithClientInfo]
-		const bVal = b[sortColumn.value as keyof ChangeWithClientInfo]
-
-		// Handle numeric sorting for completionPercentage
-		if (sortColumn.value === 'completionPercentage') {
-			const comparison = (aVal as number) - (bVal as number)
-			return sortDirection.value === 'asc' ? comparison : -comparison
-		}
+	return [...props.changes].sort((a, b) => {
+		const aVal = a[sortColumn.value!]
+		const bVal = b[sortColumn.value!]
 
 		// Handle date sorting
-		if (sortColumn.value === 'lastUpdatedDate') {
+		if (sortColumn.value === 'updatedAt' || sortColumn.value === 'createdAt') {
 			const comparison = new Date(aVal as string).getTime() - new Date(bVal as string).getTime()
 			return sortDirection.value === 'asc' ? comparison : -comparison
 		}
@@ -78,6 +55,18 @@ function formatDate(dateString: string): string {
 		month: 'short',
 		day: 'numeric'
 	})
+}
+
+const statusColors: Record<string, BadgeType> = {
+	'PENDING': 'yellow',
+	'CARRIER_APPROVED': 'green',
+	'CARRIER_REJECTED': 'red',
+	'COMPLETED': 'green',
+	'CANCELLED': 'dark'
+}
+
+function getStatusColor(status: string): BadgeType {
+	return statusColors[status] ?? 'default'
 }
 </script>
 
@@ -99,16 +88,13 @@ function formatDate(dateString: string): string {
 						</th>
 						<th scope="col" class="px-6 py-3">
 							<div class="flex items-center">
-								Contract Number
-								<button type="button" @click="toggleSort('contractNumber')" class="cursor-pointer">
-									<SortIcon class="w-3 h-3 ms-1.5" />
-								</button>
+								Contracts
 							</div>
 						</th>
 						<th scope="col" class="px-6 py-3">
 							<div class="flex items-center">
-								Completion
-								<button type="button" @click="toggleSort('completionPercentage')" class="cursor-pointer">
+								Status
+								<button type="button" @click="toggleSort('status')" class="cursor-pointer">
 									<SortIcon class="w-3 h-3 ms-1.5" />
 								</button>
 							</div>
@@ -116,7 +102,7 @@ function formatDate(dateString: string): string {
 						<th scope="col" class="px-6 py-3">
 							<div class="flex items-center">
 								Last Updated
-								<button type="button" @click="toggleSort('lastUpdatedDate')" class="cursor-pointer">
+								<button type="button" @click="toggleSort('updatedAt')" class="cursor-pointer">
 									<SortIcon class="w-3 h-3 ms-1.5" />
 								</button>
 							</div>
@@ -129,7 +115,7 @@ function formatDate(dateString: string): string {
 				<tbody>
 					<tr
 						v-for="(change, index) in sortedChanges"
-						:key="change.id"
+						:key="change.requestId"
 						:class="[
 							'bg-[#f8f8f8]',
 							index < sortedChanges.length - 1 ? 'border-b dark:border-gray-700 border-gray-200' : ''
@@ -137,40 +123,23 @@ function formatDate(dateString: string): string {
 					>
 						<th scope="row" class="px-6 py-4 whitespace-nowrap dark:text-white">
 							<div class="font-bold text-gray-900">{{ change.clientName }}</div>
-							<div class="font-normal text-gray-500">{{ change.clientEmail }}</div>
+							<div class="font-normal text-gray-500">SSN: ***-**-{{ getClientSsnLast4(change.clientId) }}</div>
 						</th>
 						<td class="px-6 py-4">
-							{{ change.contractNumber }}
+							<div v-for="contract in change.contracts" :key="contract">
+								{{ contract }}
+							</div>
 						</td>
 						<td class="px-6 py-4">
-							<FwbBadge type="green" v-if="change.completionPercentage === 100">Complete</FwbBadge>
-							<template v-else>
-								<div class="flex justify-between text-xs">
-									<p>0%</p>
-									<p>100%</p>
-								</div>
-								<div>
-									<FwbProgress
-										:progress="change.completionPercentage"
-										outer-classes="bg-gray-200 rounded-full"
-										inner-classes="rounded-full bg-gradient-to-r from-[#1696f6] to-[#f33405]"
-										class="w-full"
-										size="md"
-									/>
-								</div>
-							</template>
+							<!-- <FwbBadge :type="getStatusColor(change.status)">{{ change.status }}</FwbBadge> -->
 						</td>
 						<td class="px-6 py-4">
-							{{ formatDate(change.lastUpdatedDate) }}
+							{{ formatDate(change.updatedAt) }}
 						</td>
 						<td class="px-6 py-4">
-							<FwbDropdown text="Actions" color="light">
-								<FwbListGroup>
-									<FwbListGroupItem>View Details</FwbListGroupItem>
-									<FwbListGroupItem>Resume</FwbListGroupItem>
-									<FwbListGroupItem>Cancel</FwbListGroupItem>
-								</FwbListGroup>
-							</FwbDropdown>
+							<RouterLink to="/carrier-results">
+								<FwbButton class="cursor-pointer">Open Transfer</FwbButton>
+							</RouterLink>
 						</td>
 					</tr>
 				</tbody>

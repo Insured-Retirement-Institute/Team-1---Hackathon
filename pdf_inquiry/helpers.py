@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 def create_response(
     code,
     message,
-    transaction_id,
+    request_id,
     payload=None,
     status_code=200,
     processing_mode=None,
@@ -25,7 +25,7 @@ def create_response(
     Args:
         code: Response code (e.g., "EXTRACTED", "IMMEDIATE", "ERROR")
         message: Human-readable message
-        transaction_id: UUID from the transactionId header
+        request_id: UUID from the requestId header
         payload: Optional response payload dict
         status_code: HTTP status code (default 200)
         processing_mode: Optional — "immediate", "deferred", or "queued"
@@ -34,7 +34,7 @@ def create_response(
     response = {
         "code": code,
         "message": message,
-        "transactionId": transaction_id,
+        "requestId": request_id,
     }
     if payload is not None:
         response["payload"] = payload
@@ -50,22 +50,22 @@ def create_error_response(code, message, status_code=400):
     return jsonify({"code": code, "message": message}), status_code
 
 
-def validate_transaction_id(headers):
+def validate_request_id(headers):
     """
-    Validate the transactionId header.
-    Returns (transaction_id, None) on success or (None, error_response) on failure.
+    Validate the requestId header.
+    Returns (request_id, None) on success or (None, error_response) on failure.
     """
-    transaction_id = headers.get("transactionId")
-    if not transaction_id:
+    request_id = headers.get("requestId")
+    if not request_id:
         return None, create_error_response(
-            "MISSING_HEADER", "transactionId header is required", 400
+            "MISSING_HEADER", "requestId header is required", 400
         )
     try:
-        uuid.UUID(transaction_id)
-        return transaction_id, None
+        uuid.UUID(request_id)
+        return request_id, None
     except ValueError:
         return None, create_error_response(
-            "INVALID_HEADER", "transactionId must be a valid UUID", 400
+            "INVALID_HEADER", "requestId must be a valid UUID", 400
         )
 
 

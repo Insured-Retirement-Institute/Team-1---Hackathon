@@ -19,22 +19,22 @@ def get_table():
     return dynamodb.Table(TABLE_NAME)
 
 
-def get_transaction_by_id(transaction_id: str) -> Optional[Dict]:
+def get_transaction_by_id(request_id: str) -> Optional[Dict]:
     """
     Get a transaction by its transaction ID.
     Since pk is the transaction ID, we can query directly.
 
     Args:
-        transaction_id: The UUID transaction identifier
+        request_id: The UUID transaction identifier
 
     Returns:
         Transaction record or None if not found
     """
     table = get_table()
 
-    # Query by pk (transaction_id)
+    # Query by pk (request_id)
     response = table.query(
-        KeyConditionExpression=Key("pk").eq(transaction_id)
+        KeyConditionExpression=Key("pk").eq(request_id)
     )
 
     items = response.get("Items", [])
@@ -136,7 +136,7 @@ def put_transaction(transaction: Dict) -> Dict:
 
 
 def update_transaction_status(
-    transaction_id: str,
+    request_id: str,
     sk: str,
     new_status: str,
     notes: Optional[str] = None
@@ -145,7 +145,7 @@ def update_transaction_status(
     Update the status of a transaction and append to status history.
 
     Args:
-        transaction_id: The transaction ID (pk)
+        request_id: The transaction ID (pk)
         sk: The sort key
         new_status: New status value
         notes: Optional notes for the status change
@@ -165,7 +165,7 @@ def update_transaction_status(
 
     response = table.update_item(
         Key={
-            "pk": transaction_id,
+            "pk": request_id,
             "sk": sk
         },
         UpdateExpression="SET currentStatus = :status, updatedAt = :updated, statusHistory = list_append(statusHistory, :history)",
@@ -192,7 +192,7 @@ def format_transaction_for_api(transaction: Dict) -> Dict:
         Formatted transaction for API response
     """
     return {
-        "transaction-id": transaction.get("transactionId"),
+        "request-id": transaction.get("requestId"),
         "current-status": transaction.get("currentStatus"),
         "created-at": transaction.get("createdAt"),
         "updated-at": transaction.get("updatedAt"),

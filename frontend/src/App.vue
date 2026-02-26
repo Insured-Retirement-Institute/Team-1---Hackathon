@@ -24,9 +24,12 @@ useEventSource().initialize()
 	<div class="flex flex-col h-screen">
 		<AppLoader />
 		<NavBar />
-		<FwbHeading v-if="route.meta.title" tag="h2" class="text-center mb-4">
+		<FwbHeading v-if="route.meta.title" tag="h2" class="mb-4 pl-10">
 			{{ route.meta.title }}
 		</FwbHeading>
+		<p v-if="route.meta.subtitle">
+			{{ route.meta.subtitle }}
+		</p>
 		<div class="flex flex-wrap w-full *:p-2 grow overflow-auto px-10 py-5">
 			<RouterView v-slot="{ Component }">
 				<Transition name="slide" mode="out-in">
@@ -48,7 +51,7 @@ useEventSource().initialize()
 				color="default"
 				@click="handleNavigation(route.meta.next as RouteMeta)"
 				class="cursor-pointer"
-			>Next</FwbButton>
+			>{{ route.meta.nextLabel ?? 'Next' }}</FwbButton>
 		</div>
 	</div>
 </template>

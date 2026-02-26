@@ -24,7 +24,7 @@ insurance_carriers_prefix = "/api/insurance-carriers"
 def create_response(
     code,
     message,
-    transaction_id,
+    request_id,
     payload=None,
     status_code=200,
     processing_mode=None,
@@ -36,7 +36,7 @@ def create_response(
     Args:
         code: Response code (e.g., "IMMEDIATE", "DEFERRED", "RECEIVED")
         message: Human-readable response message
-        transaction_id: Unique transaction identifier (required)
+        request_id: Unique transaction identifier (required)
         payload: Optional response payload (e.g., PolicyInquiryResponse)
         status_code: HTTP status code (default 200)
         processing_mode: Optional - "immediate", "deferred", or "queued"
@@ -45,7 +45,7 @@ def create_response(
     response = {
         "code": code,
         "message": message,
-        "requestId": transaction_id
+        "requestId": request_id
     }
     if payload is not None:
         response["payload"] = payload
@@ -64,61 +64,31 @@ def create_error_response(code, message, status_code=400):
     }), status_code
 
 
-def validate_transaction_id(headers):
+def validate_request_id(headers):
     """Validate transaction ID in headers"""
-    transaction_id = headers.get('transactionId')
-    if not transaction_id:
+    request_id = headers.get('requestId')
+    if not request_id:
         return None, create_error_response(
             "MISSING_HEADER",
-            "transactionId header is required",
+            "requestId header is required",
             400
         )
     try:
-        uuid.UUID(transaction_id)
-        return transaction_id, None
+        uuid.UUID(request_id)
+        return request_id, None
     except ValueError:
         return None, create_error_response(
             "INVALID_HEADER",
-            "transactionId must be a valid UUID",
+            "requestId must be a valid UUID",
             400
         )
 
 
 def normalize_lambda_event(event):
-    """Ensure required WSGI fields are present for serverless_wsgi.
-
-    Translates Lambda Function URL / API Gateway v2 payload format to the
-    API Gateway v1 format expected by awsgi.
-    """
+    """Ensure required WSGI fields are present for serverless_wsgi."""
     if not event:
         return event
 
-    # --- Translate v2 → v1 when httpMethod is absent ---
-    if "httpMethod" not in event:
-        http_ctx = (event.get("requestContext") or {}).get("http", {})
-
-        # Method
-        event.setdefault("httpMethod", http_ctx.get("method", "GET"))
-
-        # Path
-        event.setdefault("path", event.get("rawPath", "/"))
-
-        # Query string: v2 collapses everything into rawQueryString
-        if "queryStringParameters" not in event:
-            raw_qs = event.get("rawQueryString", "")
-            if raw_qs:
-                from urllib.parse import parse_qs
-                event["queryStringParameters"] = {
-                    k: v[-1] for k, v in parse_qs(raw_qs).items()
-                }
-            else:
-                event["queryStringParameters"] = {}
-
-        # requestContext shim so awsgi can read identity/sourceIp
-        rc = event.setdefault("requestContext", {})
-        rc.setdefault("identity", {"sourceIp": http_ctx.get("sourceIp", "")})
-
-    # --- Ensure headers dict and X-Forwarded-Proto ---
     headers = event.get("headers")
     if not isinstance(headers, dict):
         headers = {}

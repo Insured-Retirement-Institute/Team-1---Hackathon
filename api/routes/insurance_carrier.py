@@ -48,7 +48,7 @@ Response payload (carrier_determination.schema.json) wrapped in StandardResponse
   {
     "code": "APPROVED" | "REJECTED" | "ERROR",
     "message": "...",
-    "transactionId": "...",
+    "requestId": "...",
     "processingMode": "immediate",
     "payload": {
       "request-id": "...",
@@ -78,7 +78,7 @@ from botocore.awsrequest import AWSRequest
 import boto3
 from helpers import (create_response,
                      create_error_response,
-                     validate_transaction_id)
+                     validate_request_id)
 sys.path.insert(0, "../")
 sys.path.insert(0, "../../")
 from lib.utils.dynamodb_utils import get_item, scan_items, Attr
@@ -342,7 +342,7 @@ def _process_carrier_policy_inquiry(carrier_key: str):
     table_name = carrier_config["table"]
     carrier_name = carrier_config["carrierName"]
 
-    transaction_id, error = validate_transaction_id(request.headers)
+    request_id, error = validate_request_id(request.headers)
     if error:
         return error
 
@@ -366,7 +366,7 @@ def _process_carrier_policy_inquiry(carrier_key: str):
         client = data.get('client', {})
         servicing_agent = requesting_firm.get('servicingAgent', {})
 
-        logger.info(f"[{carrier_name}] Policy inquiry - Transaction ID: {transaction_id}")
+        logger.info(f"[{carrier_name}] Policy inquiry - Transaction ID: {request_id}")
         logger.info(f"[{carrier_name}] Client: {client.get('clientName')}")
         logger.info(f"[{carrier_name}] Policy Numbers: {client.get('policyNumbers', [])}")
 
@@ -429,12 +429,12 @@ def _process_carrier_policy_inquiry(carrier_key: str):
         }
 
         logger.info(
-            f"[{carrier_name}] Returning {len(policies)} policies for transaction {transaction_id}")
+            f"[{carrier_name}] Returning {len(policies)} policies for transaction {request_id}")
 
         return create_response(
             "IMMEDIATE",
             f"Policy inquiry processed successfully by {carrier_name}",
-            transaction_id,
+            request_id,
             response_payload,
             200,
             processing_mode="immediate"
@@ -486,7 +486,7 @@ def policy_inquiry():
 
     Unified API endpoint - replaces /submit-policy-inquiry-request
     """
-    transaction_id, error = validate_transaction_id(request.headers)
+    request_id, error = validate_request_id(request.headers)
     if error:
         return error
 
@@ -505,7 +505,7 @@ def policy_inquiry():
         servicing_agent = requesting_firm.get('servicingAgent', {})
 
         logger.info("Policy inquiry - Transaction: %s, Firm: %s, Policies: %s",
-                    transaction_id, requesting_firm.get('firmName'),
+                    request_id, requesting_firm.get('firmName'),
                     client.get('policyNumbers', []))
 
         client_ssn = client.get('ssn')
@@ -570,9 +570,9 @@ def policy_inquiry():
         }
 
         logger.info("Returning %d policies for transaction %s",
-                    len(policies), transaction_id)
+                    len(policies), request_id)
         return create_response("IMMEDIATE", "Policy inquiry processed successfully",
-                               transaction_id, response_payload, 200, processing_mode="immediate")
+                               request_id, response_payload, 200, processing_mode="immediate")
 
     except Exception as e:
         logger.error("Error processing policy inquiry request: %s", str(e))
@@ -589,7 +589,7 @@ def policy_inquiry_callback():
 
     Unified API endpoint - replaces /submit-policy-inquiry-response
     """
-    transaction_id, error = validate_transaction_id(request.headers)
+    request_id, error = validate_request_id(request.headers)
     if error:
         return error
 
@@ -607,9 +607,9 @@ def policy_inquiry_callback():
                 400
             )
 
-        logger.info("Policy inquiry response submitted - Transaction: %s", transaction_id)
+        logger.info("Policy inquiry response submitted - Transaction: %s", request_id)
         return create_response("RECEIVED", "Policy inquiry response submitted successfully",
-                               transaction_id, None, 200)
+                               request_id, None, 200)
 
     except Exception as e:
         logger.error("Error submitting policy inquiry response: %s", str(e))
@@ -636,7 +636,7 @@ def receive_bd_change_request():
       REJECTED  — NIGO: one or more rules failed; payload has per-rule results
       ERROR     — AgentCore invocation failed
     """
-    transaction_id, error = validate_transaction_id(request.headers)
+    request_id, error = validate_request_id(request.headers)
     if error:
         return error
 
@@ -670,7 +670,7 @@ def receive_bd_change_request():
         )
 
         carrier_payload = {
-            "request-id": data.get('requestId', transaction_id),
+            "request-id": data.get('requestId', request_id),
             "submission-date": data.get('submissionDate', today),
             "client": {
                 "ssn": data.get('clientSSN', data.get('ssn', '')),
@@ -701,7 +701,7 @@ def receive_bd_change_request():
         logger.info(
             "BD change validation — Transaction: %s, Policy: %s, "
             "Carrier: %s, Receiving broker: %s, Agent NPN: %s",
-            transaction_id,
+            request_id,
             policy_number,
             data.get('carrierId'),
             data.get('receivingBrokerId'),
@@ -735,12 +735,12 @@ def receive_bd_change_request():
             code = "RECEIVED"
             message = "Validation completed"
 
-        logger.info("Determination: %s for transaction %s", det_value, transaction_id)
+        logger.info("Determination: %s for transaction %s", det_value, request_id)
 
         return create_response(
             code,
             message,
-            transaction_id,
+            request_id,
             determination,   # full IGO/NIGO detail in payload
             200,
             processing_mode="immediate"
@@ -759,7 +759,7 @@ def transfer_notification():
 
     Unified API endpoint - replaces /receive-transfer-notification
     """
-    transaction_id, error = validate_transaction_id(request.headers)
+    request_id, error = validate_request_id(request.headers)
     if error:
         return error
 
@@ -791,7 +791,7 @@ def transfer_notification():
         logger.info(
             "Transfer notification received — Transaction: %s, Policy: %s, "
             "Carrier: %s, New Broker: %s, Effective: %s",
-            transaction_id,
+            request_id,
             data.get('policyNumber'),
             data.get('carrierId'),
             data.get('receivingBrokerId'),
@@ -803,7 +803,7 @@ def transfer_notification():
         return create_response(
             "RECEIVED",
             f"Transfer notification '{notification_type}' received and processed",
-            transaction_id,
+            request_id,
             None,
             200,
             processing_mode="immediate"
@@ -822,7 +822,7 @@ def bd_change_callback():
 
     Unified API endpoint.
     """
-    transaction_id, error = validate_transaction_id(request.headers)
+    request_id, error = validate_request_id(request.headers)
     if error:
         return error
 
@@ -853,7 +853,7 @@ def bd_change_callback():
                 400
             )
 
-        logger.info(f"Submitting carrier response - Transaction ID: {transaction_id}")
+        logger.info(f"Submitting carrier response - Transaction ID: {request_id}")
         logger.info(f"Carrier: {data.get('carrierId')}")
         logger.info(f"Policy Number: {data.get('policyNumber')}")
         logger.info(f"Validation Result: {validation_result}")
@@ -865,7 +865,7 @@ def bd_change_callback():
         return create_response(
             "RECEIVED",
             f"Carrier validation response submitted - {validation_result}",
-            transaction_id,
+            request_id,
             None,
             200
         )
@@ -886,7 +886,7 @@ def transfer_confirmation():
 
     Unified API endpoint.
     """
-    transaction_id, error = validate_transaction_id(request.headers)
+    request_id, error = validate_request_id(request.headers)
     if error:
         return error
 
@@ -917,7 +917,7 @@ def transfer_confirmation():
                 400
             )
 
-        logger.info(f"Received transfer confirmation - Transaction ID: {transaction_id}")
+        logger.info(f"Received transfer confirmation - Transaction ID: {request_id}")
         logger.info(f"Policy Number: {data.get('policyNumber')}")
         logger.info(f"Confirmation Status: {confirmation_status}")
 
@@ -928,7 +928,7 @@ def transfer_confirmation():
         return create_response(
             "RECEIVED",
             f"Transfer confirmation received - {confirmation_status}",
-            transaction_id,
+            request_id,
             None,
             200
         )

@@ -3,7 +3,7 @@ Test examples for Clearinghouse API endpoints
 """
 
 # Example transaction ID (UUID v4)
-TRANSACTION_ID = "123e4567-e89b-12d3-a456-426614174000"
+REQUEST_ID = "123e4567-e89b-12d3-a456-426614174000"
 
 # Example Policy Inquiry Request (from receiving broker)
 POLICY_INQUIRY_REQUEST = {
@@ -81,7 +81,7 @@ POLICY_INQUIRY_RESPONSE = {
 
 # Example BD Change Request (from receiving broker)
 BD_CHANGE_REQUEST = {
-    "transaction-id": TRANSACTION_ID,
+    "request-id": REQUEST_ID,
     "receiving-broker-id": "BROKER-001",
     "delivering-broker-id": "BROKER-002",
     "carrier-id": "CARRIER-PL",
@@ -108,7 +108,7 @@ BD_CHANGE_REQUEST = {
 
 # Example Carrier Response (from insurance carrier)
 CARRIER_RESPONSE_APPROVED = {
-    "transaction-id": TRANSACTION_ID,
+    "request-id": REQUEST_ID,
     "carrier-id": "CARRIER-PL",
     "policy-id": "POL-001",
     "validation-result": "approved",
@@ -119,7 +119,7 @@ CARRIER_RESPONSE_APPROVED = {
 }
 
 CARRIER_RESPONSE_REJECTED = {
-    "transaction-id": TRANSACTION_ID,
+    "request-id": REQUEST_ID,
     "carrier-id": "CARRIER-PL",
     "policy-id": "POL-001",
     "validation-result": "rejected",
@@ -131,7 +131,7 @@ CARRIER_RESPONSE_REJECTED = {
 
 # Example Transfer Confirmation (from delivering broker)
 TRANSFER_CONFIRMATION = {
-    "transaction-id": TRANSACTION_ID,
+    "request-id": REQUEST_ID,
     "delivering-broker-id": "BROKER-002",
     "policy-id": "POL-001",
     "confirmation-status": "confirmed",
@@ -142,7 +142,7 @@ TRANSFER_CONFIRMATION = {
 }
 
 TRANSFER_CONFIRMATION_FAILED = {
-    "transaction-id": TRANSACTION_ID,
+    "request-id": REQUEST_ID,
     "delivering-broker-id": "BROKER-002",
     "policy-id": "POL-001",
     "confirmation-status": "failed",
@@ -155,14 +155,14 @@ TRANSFER_CONFIRMATION_FAILED = {
 # Example headers
 HEADERS = {
     "Content-Type": "application/json",
-    "transactionId": TRANSACTION_ID
+    "requestId": REQUEST_ID
 }
 
 # Example Clearinghouse Response (deferred)
 CLEARINGHOUSE_RESPONSE = {
     "code": "RECEIVED",
     "message": "Policy inquiry request received and routed to delivering broker",
-    "transactionId": TRANSACTION_ID,
+    "requestId": REQUEST_ID,
     "payload": None  # Always None for clearinghouse responses
 }
 

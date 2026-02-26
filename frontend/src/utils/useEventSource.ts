@@ -2,27 +2,27 @@ import { useEventBus } from "@vueuse/core";
 
 export const serverEventBus = useEventBus<'event'>('server-events')
 
-let sourceInstance : EventSource | undefined = undefined
+// let sourceInstance : EventSource | undefined = undefined
+let polling = false
 
 const source = () => {
-	if (sourceInstance === undefined) {
-		console.log(`connecting to ${import.meta.env.VITE_EVENTSOURCE}`)
-		sourceInstance = new EventSource(import.meta.env.VITE_EVENTSOURCE)
+	if (polling === false) {
+		const url = `${import.meta.env.VITE_EVENTSOURCE}/events`
+		console.log(`connecting to ${url}`)
 
-		sourceInstance.onerror = (error) => {
-			console.log(error)
-		}
+		setInterval(async () => {
+			try {
+				const results = await fetch(url).then(res => res.json())
+				if (results) {
+					serverEventBus.emit(results)
+				}
+			} catch (error) {
+				console.error('Failed to fetch events:', error)
+			}
+		}, 1_000)
 
-		sourceInstance.onmessage = event => {
-			console.log(event)
-			const data = JSON.parse(event.data)
-			console.log(data)
-
-			serverEventBus.emit('event', data)
-		}
+		polling = true
 	}
-
-	return sourceInstance
 }
 
 const waitForEvent = <T>(matcher : (data : T) => boolean, timeout: number = 20_000) => new Promise((resolve, reject) => {

@@ -1,9 +1,9 @@
 export interface Client {
-	id: string
-	firstName: string
-	lastName: string
-	email: string
-	accountNumber: string
-	updatedDate: string
-	numberOfContracts: number
+	clientId: string
+	clientName: string
+	ssnLast4: string
+	pk: string
+	sk: string
+	type: string
+	assignedAt: string
 }

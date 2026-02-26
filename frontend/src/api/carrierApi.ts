@@ -118,7 +118,7 @@ const generateMockData = (tableId: CarrierTable): BdChangeRequest[] => {
     const record: BdChangeRequest = {
       pk: `POLICY#${config.policyPrefix}-${policyNum}`,
       sk: `TRANSACTION#${crypto.randomUUID()}`,
-      transactionId: crypto.randomUUID(),
+      requestId: crypto.randomUUID(),
       policyNumber: `${config.policyPrefix}-${policyNum}`,
       carrierId: config.carrierId,
       carrierName: config.carrierName,
@@ -215,9 +215,9 @@ export async function fetchCarrierRequests(table: CarrierTable = 'carrier'): Pro
 }
 
 export async function fetchCarrierRequestById(
-  transactionId: string,
+  requestId: string,
   table: CarrierTable = 'carrier'
 ): Promise<BdChangeRequest | null> {
   const data = await fetchCarrierRequests(table)
-  return data.find(r => r.transactionId === transactionId) || null
+  return data.find(r => r.requestId === requestId) || null
 }

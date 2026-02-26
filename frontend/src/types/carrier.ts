@@ -38,7 +38,7 @@ export interface CarrierValidationDetails {
 export interface BdChangeRequest {
   pk: string
   sk: string
-  transactionId: string
+  requestId: string
   policyNumber: string
   carrierId: string
   carrierName: string

@@ -1,54 +1,25 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
-import type { InflightChange } from '@/models/InflightChange'
-
-function generateContractNumber(): string {
-	const prefixes = ['POL', 'CNT', 'AGR', 'ANT']
-	const prefix = prefixes[Math.floor(Math.random() * prefixes.length)]
-	const number = Math.floor(Math.random() * 9000000) + 1000000
-	return `${prefix}-${number}`
-}
-
-function generateRandomDate(daysBack: number): string {
-	const date = new Date()
-	date.setDate(date.getDate() - Math.floor(Math.random() * daysBack))
-	return date.toISOString()
-}
-
-function generateMockInflightChanges(clientIds: string[], count: number): InflightChange[] {
-	const changes: InflightChange[] = []
-	for (let i = 0; i < count; i++) {
-		const clientId = clientIds.length > 0
-			? clientIds[Math.floor(Math.random() * clientIds.length)]!
-			: crypto.randomUUID()
-
-		changes.push({
-			id: crypto.randomUUID(),
-			clientId,
-			contractNumber: generateContractNumber(),
-			completionPercentage: Math.floor(Math.random() * 100),
-			lastUpdatedDate: generateRandomDate(30)
-		})
-	}
-	return changes
-}
+import type { Transaction } from '@/models/Transaction'
+import { distributorApi } from '@/api/Api'
 
 export const useInflightChangesStore = defineStore('inflightChanges', () => {
-	const inflightChanges = ref<InflightChange[]>([])
+	const inflightChanges = ref<Transaction[]>([])
 	const isLoading = ref(false)
 
-	async function loadInflightChanges(clientIds: string[] = []) {
+	async function loadInflightChanges(npn: string = '12345678') {
 		isLoading.value = true
 		try {
-			// Simulate API call with mock data
-			await new Promise(resolve => setTimeout(resolve, 300))
-			inflightChanges.value = generateMockInflightChanges(clientIds, 4)
+			const result = await distributorApi.getAgentRequests(npn)
+			inflightChanges.value = result.requests
+		} catch (error) {
+			console.error('Failed to load transactions:', error)
 		} finally {
 			isLoading.value = false
 		}
 	}
 
-	function getChangesByClientId(clientId: string): InflightChange[] {
+	function getChangesByClientId(clientId: string): Transaction[] {
 		return inflightChanges.value.filter(c => c.clientId === clientId)
 	}
 

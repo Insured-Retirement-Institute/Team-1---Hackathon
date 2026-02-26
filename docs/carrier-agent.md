@@ -68,7 +68,7 @@ Both endpoints accept the same `BdChangeRequest` payload and return the same res
 ### Required Header
 
 ```
-transactionId: <UUID>
+requestId: <UUID>
 ```
 
 ### Request Body (`BdChangeRequest`)
@@ -104,7 +104,7 @@ transactionId: <UUID>
 
 ```json
 POST /api/insurance-carriers/receive-bd-change-request
-transactionId: 550e8400-e29b-41d4-a716-446655440000
+requestId: 550e8400-e29b-41d4-a716-446655440000
 
 {
   "receivingBrokerId":   "BD-001",
@@ -137,7 +137,7 @@ transactionId: 550e8400-e29b-41d4-a716-446655440000
 {
   "code": "APPROVED",
   "message": "Servicing agent change approved — all business rules passed",
-  "transactionId": "550e8400-e29b-41d4-a716-446655440000",
+  "requestId": "550e8400-e29b-41d4-a716-446655440000",
   "processingMode": "immediate",
   "payload": {
     "request-id": "550e8400-e29b-41d4-a716-446655440000",
@@ -180,7 +180,7 @@ transactionId: 550e8400-e29b-41d4-a716-446655440000
 {
   "code": "REJECTED",
   "message": "Servicing agent change rejected — 7 of 9 hard-stop rules failed",
-  "transactionId": "550e8400-e29b-41d4-a716-446655440000",
+  "requestId": "550e8400-e29b-41d4-a716-446655440000",
   "processingMode": "immediate",
   "payload": {
     "determination": "NIGO",
