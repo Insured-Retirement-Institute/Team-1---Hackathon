@@ -62,9 +62,9 @@ def get_timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def find_transaction_by_id(request_id: str, table_name: str = None):
+def find_request_by_id(request_id: str, table_name: str = None):
     """
-    Find a transaction by ID across distributor tables.
+    Find a request by ID across distributor tables.
     Returns (record, table_name) or (None, None).
     """
     tables_to_search = [table_name] if table_name else ["distributor", "distributor-2"]
@@ -83,7 +83,7 @@ def find_transaction_by_id(request_id: str, table_name: str = None):
     return None, None
 
 
-def create_transaction_record(
+def create_request_record(
     request_id: str,
     npn: str,
     broker_id: str,
@@ -95,12 +95,12 @@ def create_transaction_record(
     agent_details: dict,
     other_broker: dict,
 ) -> dict:
-    """Create a new transaction record for the distributor table."""
+    """Create a new request record for the distributor table."""
     timestamp = get_timestamp()
 
     record = {
         "pk": f"NPN#{npn}",
-        "sk": f"TRANSACTION#{request_id}",
+        "sk": f"REQUEST#{request_id}",
         "request-id": request_id,
         "policy-id": policy_id,
         "carrier-id": carrier_id,
@@ -110,7 +110,7 @@ def create_transaction_record(
         "status-history": [{
             "status": "MANIFEST_REQUESTED",
             "timestamp": timestamp,
-            "notes": "Transaction initiated"
+            "notes": "Request initiated"
         }],
         "created-at": timestamp,
         "updated-at": timestamp,
@@ -130,14 +130,14 @@ def create_transaction_record(
     return record
 
 
-def update_transaction_status(
+def update_request_status(
     table_name: str,
     pk: str,
     sk: str,
     new_status: str,
     notes: str = None
 ) -> dict:
-    """Update transaction status and append to history."""
+    """Update request status and append to history."""
     timestamp = get_timestamp()
 
     history_item = {"status": new_status, "timestamp": timestamp}
@@ -228,7 +228,7 @@ def policy_inquiry():
         else:
             carrier_id = "unknown"
 
-        record = create_transaction_record(
+        record = create_request_record(
             request_id=request_id,
             npn=npn,
             broker_id=broker_id,
@@ -317,10 +317,10 @@ def policy_inquiry_callback():
         logger.info(f"Client: {data.get('client', {}).get('clientName')}")
 
         # Find and update existing transaction
-        record, table_name = find_transaction_by_id(request_id)
+        record, table_name = find_request_by_id(request_id)
 
         if record:
-            update_transaction_status(
+            update_request_status(
                 table_name,
                 record["pk"],
                 record["sk"],
@@ -386,10 +386,10 @@ def bd_change():
         logger.info(f"Delivering Broker: {data.get('delivering-broker-id')}")
 
         # Find and update existing transaction
-        record, table_name = find_transaction_by_id(request_id)
+        record, table_name = find_request_by_id(request_id)
 
         if record:
-            update_transaction_status(
+            update_request_status(
                 table_name,
                 record["pk"],
                 record["sk"],
@@ -469,11 +469,11 @@ def transfer_notification():
         new_status = notification_to_status.get(notification_type, "TRANSFER_PROCESSING")
 
         # Find and update existing transaction
-        record, table_name = find_transaction_by_id(request_id)
+        record, table_name = find_request_by_id(request_id)
 
         if record:
             # Update status
-            update_transaction_status(
+            update_request_status(
                 table_name,
                 record["pk"],
                 record["sk"],
@@ -1373,7 +1373,7 @@ def bd_change_callback():
         logger.info(f"Validation Result: {validation_result}")
 
         # Find and update existing transaction
-        record, table_name = find_transaction_by_id(request_id)
+        record, table_name = find_request_by_id(request_id)
 
         if record:
             new_status = "CARRIER_APPROVED" if validation_result == "approved" else "CARRIER_REJECTED"
@@ -1382,7 +1382,7 @@ def bd_change_callback():
                 rejection_reason = data.get('rejectionReason', 'Not provided')
                 notes += f": {rejection_reason}"
 
-            update_transaction_status(
+            update_request_status(
                 table_name,
                 record["pk"],
                 record["sk"],
@@ -1450,18 +1450,18 @@ def transfer_confirmation():
         logger.info(f"Confirmation Status: {confirmation_status}")
 
         # Find and update existing transaction
-        record, table_name = find_transaction_by_id(request_id)
+        record, table_name = find_request_by_id(request_id)
 
         if record:
             if confirmation_status == "confirmed":
-                update_transaction_status(
+                update_request_status(
                     table_name,
                     record["pk"],
                     record["sk"],
                     "TRANSFER_CONFIRMED",
                     "Transfer confirmed"
                 )
-                update_transaction_status(
+                update_request_status(
                     table_name,
                     record["pk"],
                     record["sk"],
@@ -1470,7 +1470,7 @@ def transfer_confirmation():
                 )
                 logger.info(f"Updated transaction {request_id} to COMPLETE")
             elif confirmation_status == "failed":
-                update_transaction_status(
+                update_request_status(
                     table_name,
                     record["pk"],
                     record["sk"],
@@ -1513,7 +1513,7 @@ def query_status(requestId):
         logger.info(f"Querying status for request: {requestId}")
 
         # Search for transaction in distributor tables
-        record, table_name = find_transaction_by_id(requestId)
+        record, table_name = find_request_by_id(requestId)
 
         if not record:
             return create_error_response(

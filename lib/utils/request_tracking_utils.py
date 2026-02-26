@@ -1,6 +1,6 @@
 """
 DynamoDB utility functions for request-tracking table.
-Provides methods for querying and updating transaction status.
+Provides methods for querying and updating request status.
 """
 
 import boto3
@@ -19,16 +19,16 @@ def get_table():
     return dynamodb.Table(TABLE_NAME)
 
 
-def get_transaction_by_id(request_id: str) -> Optional[Dict]:
+def get_request_by_id(request_id: str) -> Optional[Dict]:
     """
-    Get a transaction by its transaction ID.
-    Since pk is the transaction ID, we can query directly.
+    Get a request by its request ID.
+    Since pk is the request ID, we can query directly.
 
     Args:
-        request_id: The UUID transaction identifier
+        request_id: The ULID request identifier
 
     Returns:
-        Transaction record or None if not found
+        Request record or None if not found
     """
     table = get_table()
 
@@ -41,12 +41,12 @@ def get_transaction_by_id(request_id: str) -> Optional[Dict]:
     return items[0] if items else None
 
 
-def scan_all_transactions() -> List[Dict]:
+def scan_all_requests() -> List[Dict]:
     """
-    Scan all transactions from the request-tracking table.
+    Scan all requests from the request-tracking table.
 
     Returns:
-        List of transaction records
+        List of request records
     """
     table = get_table()
     items = []
@@ -61,15 +61,15 @@ def scan_all_transactions() -> List[Dict]:
     return items
 
 
-def query_transactions_by_status(status: str) -> List[Dict]:
+def query_requests_by_status(status: str) -> List[Dict]:
     """
-    Query transactions by current status using scan with filter.
+    Query requests by current status using scan with filter.
 
     Args:
         status: Status to filter by (e.g., 'CARRIER_VALIDATION_PENDING')
 
     Returns:
-        List of matching transaction records
+        List of matching request records
     """
     from boto3.dynamodb.conditions import Attr
 
@@ -91,15 +91,15 @@ def query_transactions_by_status(status: str) -> List[Dict]:
     return items
 
 
-def query_transactions_by_carrier(carrier_id: str) -> List[Dict]:
+def query_requests_by_carrier(carrier_id: str) -> List[Dict]:
     """
-    Query transactions by carrier ID using scan with filter.
+    Query requests by carrier ID using scan with filter.
 
     Args:
         carrier_id: Carrier identifier (e.g., 'athene', 'pacific-life')
 
     Returns:
-        List of matching transaction records
+        List of matching request records
     """
     from boto3.dynamodb.conditions import Attr
 
@@ -121,31 +121,31 @@ def query_transactions_by_carrier(carrier_id: str) -> List[Dict]:
     return items
 
 
-def put_transaction(transaction: Dict) -> Dict:
+def put_request(request: Dict) -> Dict:
     """
-    Put a transaction record into the table.
+    Put a request record into the table.
 
     Args:
-        transaction: Transaction record to insert (must include pk and sk)
+        request: Request record to insert (must include pk and sk)
 
     Returns:
         DynamoDB response
     """
     table = get_table()
-    return table.put_item(Item=transaction)
+    return table.put_item(Item=request)
 
 
-def update_transaction_status(
+def update_request_status(
     request_id: str,
     sk: str,
     new_status: str,
     notes: Optional[str] = None
 ) -> Dict:
     """
-    Update the status of a transaction and append to status history.
+    Update the status of a request and append to status history.
 
     Args:
-        request_id: The transaction ID (pk)
+        request_id: The request ID (pk)
         sk: The sort key
         new_status: New status value
         notes: Optional notes for the status change
@@ -180,30 +180,30 @@ def update_transaction_status(
     return response
 
 
-def format_transaction_for_api(transaction: Dict) -> Dict:
+def format_request_for_api(request: Dict) -> Dict:
     """
-    Format a DynamoDB transaction record for API response.
-    Matches the TransactionStatus schema from the API spec.
+    Format a DynamoDB request record for API response.
+    Matches the RequestStatus schema from the API spec.
 
     Args:
-        transaction: Raw DynamoDB transaction record
+        request: Raw DynamoDB request record
 
     Returns:
-        Formatted transaction for API response
+        Formatted request for API response
     """
     return {
-        "request-id": transaction.get("requestId"),
-        "current-status": transaction.get("currentStatus"),
-        "created-at": transaction.get("createdAt"),
-        "updated-at": transaction.get("updatedAt"),
-        "status-history": transaction.get("statusHistory", []),
-        "policies-affected": transaction.get("policiesAffected", []),
+        "request-id": request.get("requestId"),
+        "current-status": request.get("currentStatus"),
+        "created-at": request.get("createdAt"),
+        "updated-at": request.get("updatedAt"),
+        "status-history": request.get("statusHistory", []),
+        "policies-affected": request.get("policiesAffected", []),
         "additional-data": {
-            "receiving-broker-id": transaction.get("receivingBrokerId"),
-            "delivering-broker-id": transaction.get("deliveringBrokerId"),
-            "carrier-id": transaction.get("carrierId"),
-            "carrier-name": transaction.get("carrierName"),
-            "client-name": transaction.get("clientName"),
-            "ssn-last-4": transaction.get("ssnLast4"),
+            "receiving-broker-id": request.get("receivingBrokerId"),
+            "delivering-broker-id": request.get("deliveringBrokerId"),
+            "carrier-id": request.get("carrierId"),
+            "carrier-name": request.get("carrierName"),
+            "client-name": request.get("clientName"),
+            "ssn-last-4": request.get("ssnLast4"),
         }
     }

@@ -9,7 +9,7 @@ Flow
 ----
 1. Validate the inbound CarrierResponse payload.
 2. Update the `transact` DynamoDB table with the validation result.
-3. Publish a TransactionUpdate event to EventBridge so the frontend
+3. Publish a RequestUpdate event to EventBridge so the frontend
    can show the final approval/rejection status.
 
 Request
@@ -105,7 +105,7 @@ def update_transact_record(
     )
 
     table.update_item(
-        Key={"pk": request_id, "sk": "TRANSACTION"},
+        Key={"pk": request_id, "sk": "REQUEST"},
         UpdateExpression=(
             "SET #status      = :status, "
             "#updated         = :updated, "
@@ -137,7 +137,7 @@ def update_transact_record(
 # ---------------------------------------------------------------------------
 
 def fire_eventbridge_event(request_id: str, verb: str) -> None:
-    """Publish a UI-facing TransactionUpdate event to EventBridge."""
+    """Publish a UI-facing RequestUpdate event to EventBridge."""
     events = boto3.client("events", region_name=REGION)
     detail = {
         "verb": verb,
@@ -146,7 +146,7 @@ def fire_eventbridge_event(request_id: str, verb: str) -> None:
     }
     events.put_events(Entries=[{
         "Source":       "hackathon.broker-dealer",
-        "DetailType":   "TransactionUpdate",
+        "DetailType":   "RequestUpdate",
         "Detail":       json.dumps(detail),
         "EventBusName": EVENTBRIDGE_BUS_NAME,
     }])

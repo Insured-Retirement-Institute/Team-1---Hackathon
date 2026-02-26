@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from utils.dynamodb_utils import (
     scan_all_policies,
     get_policy_by_number,
-    get_policy_by_transaction,
+    get_policy_by_request,
     query_policies_by_client,
     query_policies_by_ssn_last4,
     query_policies_by_status,

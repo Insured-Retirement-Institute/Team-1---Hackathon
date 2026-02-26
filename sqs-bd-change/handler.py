@@ -9,7 +9,7 @@ Flow
 2. POST the BdChangeRequest to the internal IIEX/DTCC API
    at {INTERNAL_API_BASE_URL}/bd-change.
 3. Write the initial "pending" state back to the `transact` DynamoDB table.
-4. Publish a TransactionUpdate event to EventBridge so the frontend
+4. Publish a RequestUpdate event to EventBridge so the frontend
    knows the transfer request has been submitted.
 
 Note: the actual approval/rejection arrives asynchronously via the
@@ -105,7 +105,7 @@ def update_transact_record(
 
     now = _now()
     table.update_item(
-        Key={"pk": request_id, "sk": "TRANSACTION"},
+        Key={"pk": request_id, "sk": "REQUEST"},
         UpdateExpression=(
             "SET #status       = :status, "
             "#updated          = :updated, "
@@ -141,7 +141,7 @@ def update_transact_record(
 # ---------------------------------------------------------------------------
 
 def fire_eventbridge_event(request_id: str, verb: str) -> None:
-    """Publish a UI-facing TransactionUpdate event to EventBridge."""
+    """Publish a UI-facing RequestUpdate event to EventBridge."""
     events = boto3.client("events", region_name=REGION)
     detail = {
         "verb": verb,
@@ -150,7 +150,7 @@ def fire_eventbridge_event(request_id: str, verb: str) -> None:
     }
     events.put_events(Entries=[{
         "Source":       "hackathon.broker-dealer",
-        "DetailType":   "TransactionUpdate",
+        "DetailType":   "RequestUpdate",
         "Detail":       json.dumps(detail),
         "EventBusName": EVENTBRIDGE_BUS_NAME,
     }])
