@@ -3,9 +3,8 @@ import { ref, computed } from 'vue'
 import SortIcon from '@/icons/SortIcon.svg'
 import type { Transaction } from '@/models/Transaction'
 import type { Client } from '@/models/Client'
-import { FwbBadge, FwbButton, FwbDropdown, FwbListGroup, FwbListGroupItem } from 'flowbite-vue'
+import { FwbBadge, FwbButton } from 'flowbite-vue'
 
-type BadgeType = 'default' | 'dark' | 'red' | 'green' | 'yellow' | 'indigo' | 'purple' | 'pink'
 type SortableColumn = keyof Transaction
 type SortDirection = 'asc' | 'desc'
 
@@ -56,28 +55,16 @@ function formatDate(dateString: string): string {
 		day: 'numeric'
 	})
 }
-
-const statusColors: Record<string, BadgeType> = {
-	'PENDING': 'yellow',
-	'CARRIER_APPROVED': 'green',
-	'CARRIER_REJECTED': 'red',
-	'COMPLETED': 'green',
-	'CANCELLED': 'dark'
-}
-
-function getStatusColor(status: string): BadgeType {
-	return statusColors[status] ?? 'default'
-}
 </script>
 
 <template>
-	<div class="bg-[#f8f8f8] rounded-xl">
+	<div class="bg-[#F1F1F1] border border-[#CCCCCC] rounded-xl">
 		<p class="justify-center text-gray-900 text-xl font-bold p-4">Inflight Changes</p>
 
 		<div class="relative overflow-x-auto rounded-xl">
 			<table class="w-full text-sm text-left rtl:text-right text-gray-500 dark:text-gray-400 border-t-gray-300 border-t">
-				<thead class="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400">
-					<tr>
+				<thead class="text-xs text-gray-700 uppercase bg-[#F1F1F1] dark:bg-gray-700 dark:text-gray-400">
+					<tr class="border-b border-gray-200">
 						<th scope="col" class="px-6 py-3">
 							<div class="flex items-center">
 								Client Name
@@ -117,7 +104,7 @@ function getStatusColor(status: string): BadgeType {
 						v-for="(change, index) in sortedChanges"
 						:key="change.requestId"
 						:class="[
-							'bg-[#f8f8f8]',
+							'bg-[#F1F1F1]',
 							index < sortedChanges.length - 1 ? 'border-b dark:border-gray-700 border-gray-200' : ''
 						]"
 					>
@@ -131,13 +118,14 @@ function getStatusColor(status: string): BadgeType {
 							</div>
 						</td>
 						<td class="px-6 py-4">
-							<!-- <FwbBadge :type="getStatusColor(change.status)">{{ change.status }}</FwbBadge> -->
+							<FwbBadge v-if="change.status === 'CARRIER_APPROVED'" type="green">Approved</FwbBadge>
+							<FwbBadge v-else type="default">In Progress</FwbBadge>
 						</td>
 						<td class="px-6 py-4">
 							{{ formatDate(change.updatedAt) }}
 						</td>
 						<td class="px-6 py-4">
-							<RouterLink to="/carrier-results">
+							<RouterLink :to="`/request-contract/${change.requestId}`">
 								<FwbButton class="cursor-pointer">Open Transfer</FwbButton>
 							</RouterLink>
 						</td>

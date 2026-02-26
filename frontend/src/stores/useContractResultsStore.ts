@@ -60,7 +60,7 @@ function generateCusipNumber(): string {
 
 function mapDetailedPolicyToContractRecord(policy: DetailedPolicyInfo, resolved: boolean): ContractRecord {
 	return {
-		id: ulid(),
+		id: crypto.randomUUID(),
 		contractNumber: policy.policyNumber ?? '',
 		carrierName: policy.carrierName ?? '',
 		productName: policy.productName ?? '',
@@ -141,7 +141,7 @@ function generateFakeDtccResult(searchContract: ContractRecord, index: number): 
 		const carrierName = randomElement(CARRIER_NAMES)
 		const productName = CARRIER_PRODUCTS[carrierName]!
 		return {
-			id: ulid(),
+			id: crypto.randomUUID(),
 			carrierName,
 			productName,
 			contractNumber: searchContract.contractNumber,
@@ -157,7 +157,7 @@ function generateFakeDtccResult(searchContract: ContractRecord, index: number): 
 
 	// Unresolved - return partial data
 	return {
-		id: ulid(),
+		id: crypto.randomUUID(),
 		carrierName: '',
 		productName: '',
 		contractNumber: searchContract.contractNumber,
@@ -174,7 +174,7 @@ function generateFakeDtccResult(searchContract: ContractRecord, index: number): 
 function generateFakeCarrierResult(dtccRecord: ContractRecord): ContractRecord {
 	return {
 		...dtccRecord,
-		id: ulid(),
+		id: crypto.randomUUID(),
 		planType: randomEnumValue(PlanType),
 		accountType: randomEnumValue(AccountType),
 		ownerName: randomElement(OWNER_NAMES),
@@ -233,7 +233,7 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 
 	function createEmptyContract(): ContractRecord {
 		return {
-			id: ulid(),
+			id: crypto.randomUUID(),
 			carrierName: '',
 			productName: '',
 			contractNumber: '',
@@ -293,7 +293,7 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 			}
 
 			const response = await brokerDealerApi.triggerPolicyInquiry(request)
-
+			console.log(response)
 
 			if (isClientResponse(response.payload?.client) && response.payload?.client.policies && response.payload.client.policies.length > 0) {
 				// Map API response to ContractRecords
@@ -348,22 +348,6 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 
 		await new Promise(resolve => setTimeout(resolve, 3000))
 
-		let requestId = ''
-
-		try {
-			const result = await distributorApi.createRequest('12345678', {
-				clientId: clientSearch.value.clientId,
-				contracts: policyNumbers,
-				receivingBrokerId: 'BD002',
-			})
-
-			requestId = result.request.requestId
-		} catch {
-
-		} finally {
-
-		}
-
 		if (autoLookup.length) {
 			try {
 				// Try API call
@@ -417,8 +401,8 @@ export const useContractResultsStore = defineStore('contractResults', () => {
 						firmId: undefined
 					}
 				})
-			} catch {
-
+			} catch (e) {
+				console.error(e)
 			} finally {
 				loaderStore.completeTask(group?.[0]?.carrierName ?? '')
 			}

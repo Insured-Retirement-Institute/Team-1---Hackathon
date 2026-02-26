@@ -79,7 +79,7 @@ onChange(async files => {
 
 <template>
 	<div class="w-full">
-		<div class="p-10 bg-[#f8f8f8] rounded-xl mb-4">
+		<div class="p-10 bg-[#F1F1F1] border border-[#CCCCCC] rounded-xl mb-4">
 			<div class="flex items-center justify-end">
 				<FwbButton class="cursor-pointer" @click="open">
 					<div class="flex items-center gap-2">

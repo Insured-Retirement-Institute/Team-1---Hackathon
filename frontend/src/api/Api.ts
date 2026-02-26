@@ -13,6 +13,7 @@ import type {
 } from '@/models/ClearinghouseApi'
 import { monotonicFactory } from "ulid";
 import type { Client } from "@/models/Client";
+import type { Contract } from "@/models/Contract";
 import type { Transaction as Request } from "@/models/Transaction";
 
 const ulid = monotonicFactory()
@@ -235,6 +236,6 @@ export const distributorApi = {
 			body: JSON.stringify(client)
 		}),
 
-	getClientContracts: <T = unknown>(clientId: string): Promise<T> =>
+	getClientContracts: (clientId: string): Promise<{ contracts: Contract[] }> =>
 		fetchJsonSimple(`${DISTRIBUTOR_API}/client/${clientId}/contracts`)
 }

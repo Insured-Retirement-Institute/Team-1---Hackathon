@@ -12,7 +12,7 @@ const contractResultsStore = useContractResultsStore()
 	<div class="w-full">
 		<ContractResultsTable :records="contractResultsStore.carrierContractResults" />
 
-		<div class="rounded-xl bg-[#f8f8f8] p-6 flex flex-col items-center justify-center mt-4">
+		<div class="rounded-xl bg-[#F1F1F1] border border-[#CCCCCC] p-6 flex flex-col items-center justify-center mt-4">
 			<div class="flex items-center justify-center">
 				<FwbButton>
 					Download Carrier Letter

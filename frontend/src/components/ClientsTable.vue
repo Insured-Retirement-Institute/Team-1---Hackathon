@@ -65,7 +65,7 @@ function formatDate(dateString: string): string {
 </script>
 
 <template>
-	<div class="bg-[#f8f8f8] rounded-xl">
+	<div class="bg-[#F1F1F1] border border-[#CCCCCC] rounded-xl">
 		<p class="justify-center text-gray-900 text-xl font-bold p-4">My Book of Business</p>
 
 		<div class="flex items-center justify-between p-4">
@@ -87,8 +87,8 @@ function formatDate(dateString: string): string {
 
 		<div class="relative overflow-x-auto rounded-xl">
 			<table class="w-full text-sm text-left rtl:text-right text-gray-500 dark:text-gray-400 border-t-gray-300 border-t rounded-xl">
-				<thead class="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400">
-					<tr>
+				<thead class="text-xs text-gray-700 uppercase bg-[#F1F1F1] dark:bg-gray-700 dark:text-gray-400">
+					<tr class="border-b border-gray-200">
 						<th scope="col" class="px-6 py-3">
 							<div class="flex items-center">
 								Name
@@ -123,7 +123,7 @@ function formatDate(dateString: string): string {
 						v-for="(client, index) in sortedClients"
 						:key="client.clientId"
 						:class="[
-							'bg-[#f8f8f8]',
+							'bg-[#F1F1F1]',
 							index < sortedClients.length - 1 ? 'border-b dark:border-gray-700 border-gray-200' : ''
 						]"
 					>
